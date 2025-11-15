@@ -17,6 +17,8 @@ import {
   Montserrat_700Bold,
 } from "@expo-google-fonts/montserrat";
 import AppSplashScreen from "../components/ui/SplashScreen";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { setupDevTools } from "@/utils/devTools";
 
 // Keep splash screen visible while loading
 SplashScreen.preventAutoHideAsync();
@@ -43,6 +45,9 @@ export default function Layout() {
     async function prepare() {
       // Wait for fonts to load
       if (fontsLoaded) {
+        // Setup dev tools (only in development)
+        setupDevTools();
+        
         // Show splash for 1 second, then hide
         await new Promise(resolve => setTimeout(resolve, 1000));
         await SplashScreen.hideAsync();
@@ -57,5 +62,9 @@ export default function Layout() {
     return <AppSplashScreen />;
   }
 
-  return <Slot />;
+  return (
+    <AuthProvider>
+      <Slot />
+    </AuthProvider>
+  );
 }
