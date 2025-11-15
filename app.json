@@ -1,18 +1,20 @@
 {
-  "scheme": "acme",
-  "userInterfaceStyle": "automatic",
-  "orientation": "default",
-  "web": {
-    "output": "static"
-  },
-  "plugins": [
-    [
-      "expo-router",
-      {
-        "origin": "https://n"
-      }
-    ]
-  ],
-  "name": "wardro8e-app",
-  "slug": "wardro8e-app"
+  "expo": {
+    "scheme": "wardro8e",
+    "userInterfaceStyle": "automatic",
+    "orientation": "default",
+    "web": {
+      "output": "static"
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "origin": "https://wardro8e.app"
+        }
+      ]
+    ],
+    "name": "wardro8e-app",
+    "slug": "wardro8e-app"
+  }
 }

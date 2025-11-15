@@ -27,7 +27,7 @@ export default function Index() {
       
       if (!onboardingCompleted) {
         console.log('✅ Showing onboarding screens');
-        setDestination('/(onboarding)/welcome');
+        setDestination('/(onboarding)');
         setChecking(false);
         return;
       }
@@ -83,7 +83,7 @@ export default function Index() {
     } catch (error) {
       console.error('❌ Error checking destination:', error);
       // On any error, show onboarding (safest default)
-      setDestination('/(onboarding)/welcome');
+      setDestination('/(onboarding)');
     } finally {
       setChecking(false);
     }

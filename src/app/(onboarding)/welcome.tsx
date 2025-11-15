@@ -7,21 +7,17 @@ export default function WelcomeScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <View className="flex-1 justify-between py-8 px-6">
+      <View className="flex-1 justify-between pt-20 px-6">
         {/* Header */}
-        <View>
-          <Text className="text-3xl font-serif-bold text-neutral-900">
-            wardro8e
-          </Text>
-          <Text className="text-sm text-neutral-500 mt-1">
-            Curated Fashion Discovery
-          </Text>
+        <View className="items-center">
+          <Text className="text-5xl font-serif text-primary-500 text-center mb-2">Wardro8e</Text>
+          <Text className="text-sm text-neutral-500 text-center">Curated Fashion Discovery</Text>
         </View>
 
         {/* Content - Centered */}
         <View className="items-center">
           {/* Image */}
-          <View className="w-64 h-64 mb-6 rounded-2xl overflow-hidden bg-neutral-100">
+          <View className="w-96 h-64 mb-6 rounded-2xl overflow-hidden bg-neutral-100">
             <Image
               source={{ uri: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?q=80&w=800&auto=format&fit=crop' }}
               className="w-full h-full"

@@ -33,15 +33,11 @@ export default function AIMatchingScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <View className="flex-1 justify-between py-8 px-6">
+      <View className="flex-1 justify-between pt-20 px-6">
         {/* Header */}
-        <View>
-          <Text className="text-3xl font-serif-bold text-neutral-900">
-            wardro8e
-          </Text>
-          <Text className="text-sm text-neutral-500 mt-1">
-            Curated Fashion Discovery
-          </Text>
+        <View className="items-center">
+          <Text className="text-5xl font-serif text-primary-500 text-center mb-2">Wardro8e</Text>
+          <Text className="text-sm text-neutral-500 text-center">Curated Fashion Discovery</Text>
         </View>
 
         {/* Animated Content - Centered */}
@@ -53,7 +49,7 @@ export default function AIMatchingScreen() {
           className="items-center"
         >
           {/* Image */}
-          <View className="w-64 h-64 mb-6 rounded-2xl overflow-hidden bg-neutral-100">
+          <View className="w-96 h-64 mb-6 rounded-2xl overflow-hidden bg-neutral-100">
             <Image
               source={{ uri: 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?q=80&w=800&auto=format&fit=crop' }}
               className="w-full h-full"
@@ -83,7 +79,7 @@ export default function AIMatchingScreen() {
               onPress={() => router.back()}
               className="w-12 h-12 border border-neutral-200 rounded-xl items-center justify-center"
             >
-              <Text className="text-neutral-700 text-lg">←</Text>
+              <Text className="text-neutral-700 text-lg font-bold pb-2 items-center">←</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -96,6 +92,14 @@ export default function AIMatchingScreen() {
             </TouchableOpacity>
           </View>
         </View>
+        <TouchableOpacity
+            onPress={() => router.replace('/(auth)/welcome')}
+            className="h-10 items-center justify-center text-center"
+          >
+            <Text className="text-neutral-500 text-xs">
+              Already have an account? <Text className="text-primary-500 font-sans-semibold">Log in</Text>
+            </Text>
+          </TouchableOpacity>
       </View>
     </SafeAreaView>
   );

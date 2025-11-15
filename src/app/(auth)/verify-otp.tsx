@@ -1,4 +1,4 @@
-import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useRef, useEffect } from 'react';
@@ -6,8 +6,8 @@ import { supabase } from '@/lib/supabase';
 
 export default function VerifyOTPScreen() {
   const router = useRouter();
-  const { email, password, otp: sentOtp } = useLocalSearchParams<{ 
-    email: string; 
+  const { email, password, otp: sentOtp } = useLocalSearchParams<{
+    email: string;
     password: string;
     otp: string;
   }>();
@@ -109,7 +109,7 @@ export default function VerifyOTPScreen() {
 
       Alert.alert('Success', 'A new OTP has been sent to your email');
       setResendTimer(60);
-      
+
       // Update the router params with new OTP
       router.setParams({ otp: newOtp });
     } catch (error: any) {
@@ -118,71 +118,86 @@ export default function VerifyOTPScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-white px-6">
-      {/* Header */}
-      <View className="mt-4 mb-8">
-        <TouchableOpacity onPress={() => router.back()} className="mb-6">
-          <Text className="text-primary-500 text-base">← Back</Text>
-        </TouchableOpacity>
+    <SafeAreaView className="flex-1 bg-white">
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        className="flex-1"
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
+        <View className="flex-1 justify-between pt-12 px-6 pb-6">
+          {/* Header */}
+          <View className="items-center">
+            <TouchableOpacity
+              onPress={() => router.back()}
+              className="absolute left-0 top-0"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text className="text-neutral-700 text-lg font-bold pb-2">←</Text>
+            </TouchableOpacity>
+          </View>
 
-        <Text className="text-3xl font-serif-bold text-neutral-900 mb-2">
-          Verify your email
-        </Text>
-        <Text className="text-base text-neutral-600">
-          Enter the 6-digit code sent to {email}
-        </Text>
-      </View>
+          {/* OTP Input - Centered */}
+          <View className="flex-1 justify-center items-center">
+            <View className="items-center mb-12">
+              <Text className="text-5xl font-serif text-primary-500 text-center mb-2">Wardro8e</Text>
+              <Text className="text-xl font-serif-bold text-neutral-900 text-center mb-2">Verify your email</Text>
+              <Text className="text-sm text-neutral-600 text-center px-4">Enter the 6-digit code sent to {email}</Text>
+            </View>
+            <View className="flex-row justify-between gap-3 mb-8 w-full max-w-xs">
+              {otp.map((digit, index) => (
+                <TextInput
+                  key={index}
+                  ref={(ref: any) => (inputRefs.current[index] = ref)}
+                  value={digit}
+                  onChangeText={(value) => handleOtpChange(value, index)}
+                  onKeyPress={(e) => handleKeyPress(e, index)}
+                  keyboardType="number-pad"
+                  maxLength={1}
+                  className="flex-1 h-14 bg-neutral-50 border border-neutral-200 rounded-xl text-center text-2xl font-sans-medium"
+                  style={{ borderColor: digit ? '#208B84' : '#E5E5E5' }}
+                  editable={!loading}
+                />
+              ))}
+            </View>
 
-      {/* OTP Input */}
-      <View className="flex-row justify-between mb-6">
-        {otp.map((digit, index) => (
-          <TextInput
-            key={index}
-            ref={(ref) => (inputRefs.current[index] = ref)}
-            value={digit}
-            onChangeText={(value) => handleOtpChange(value, index)}
-            onKeyPress={(e) => handleKeyPress(e, index)}
-            keyboardType="number-pad"
-            maxLength={1}
-            className="w-12 h-14 bg-neutral-50 border-2 border-neutral-200 rounded-xl text-center text-2xl font-sans-semibold"
-            style={{ borderColor: digit ? '#208B84' : '#E5E5E5' }}
-            editable={!loading}
-          />
-        ))}
-      </View>
+            {/* Resend */}
+            <View className="items-center mb-4">
+              {resendTimer > 0 ? (
+                <Text className="text-neutral-500 text-sm">
+                  Resend code in 00:{resendTimer.toString().padStart(2, '0')}
+                </Text>
+              ) : (
+                <TouchableOpacity onPress={resendOTP}>
+                  <Text className="text-primary-500 text-sm font-sans-semibold">
+                    Resend Code
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
 
-      {/* Resend */}
-      <View className="items-center mb-8">
-        {resendTimer > 0 ? (
-          <Text className="text-neutral-500 text-sm">
-            Resend code in 00:{resendTimer.toString().padStart(2, '0')}
-          </Text>
-        ) : (
-          <TouchableOpacity onPress={resendOTP}>
-            <Text className="text-primary-500 text-sm font-sans-semibold">
-              Resend Code
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
+            {loading && (
+              <View className="items-center mt-4">
+                <ActivityIndicator size="large" color="#208B84" />
+                <Text className="text-neutral-600 mt-2 text-sm">Verifying...</Text>
+              </View>
+            )}
+          </View>
 
-      {loading && (
-        <View className="items-center">
-          <ActivityIndicator size="large" color="#208B84" />
-          <Text className="text-neutral-600 mt-2">Verifying...</Text>
+          {/* Change Email */}
+          <View className="pt-4">
+            <TouchableOpacity
+              onPress={() => router.back()}
+              className="items-center"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text className="text-neutral-500 text-xs">
+                Wrong email?{' '}
+                <Text className="text-primary-500 font-sans-semibold">Change</Text>
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      )}
-
-      {/* Change Email */}
-      <View className="flex-1" />
-      <View className="pb-8 items-center">
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text className="text-neutral-600 text-sm">
-            Wrong email?{' '}
-            <Text className="text-primary-500 font-sans-semibold">Change</Text>
-          </Text>
-        </TouchableOpacity>
-      </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
