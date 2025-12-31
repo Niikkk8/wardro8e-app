@@ -2,15 +2,17 @@ import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, Keyb
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState } from 'react';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase } from '@/lib/supabase';
 
 export default function ProfileSetupScreen() {
   const router = useRouter();
   const [fullName, setFullName] = useState('');
-  const [birthday, setBirthday] = useState('');
+  const [birthday, setBirthday] = useState<Date | null>(null);
   const [gender, setGender] = useState('');
   const [loading, setLoading] = useState(false);
   const [showGenderDropdown, setShowGenderDropdown] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const genderOptions = [
     { value: 'woman', label: 'Woman' },
@@ -20,6 +22,14 @@ export default function ProfileSetupScreen() {
   ];
 
   const selectedGenderLabel = genderOptions.find(opt => opt.value === gender)?.label || '';
+
+  // Format date explicitly as DD/MM/YYYY to avoid locale issues
+  const formatDateAsDDMMYYYY = (date: Date): string => {
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0'); // getMonth() is 0-indexed
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
 
   const handleContinue = async () => {
     if (!fullName) {
@@ -34,6 +44,28 @@ export default function ProfileSetupScreen() {
 
       if (!user) throw new Error('No user found');
 
+      // Get existing profile to preserve avatar_url if it exists
+      const { data: existingProfile } = await supabase
+        .from('users')
+        .select('avatar_url')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      // Extract avatar URL from OAuth provider metadata if not already stored
+      const extractAvatarUrl = (user: any): string | undefined => {
+        const metadata = user?.user_metadata || {};
+        return metadata.avatar_url || metadata.picture || metadata.picture_url || undefined;
+      };
+      const oauthAvatarUrl = extractAvatarUrl(user);
+      
+      // Use existing avatar_url if available, otherwise use OAuth avatar_url
+      const avatarUrl = existingProfile?.avatar_url || oauthAvatarUrl;
+
+      // Format birthday as DD/MM/YYYY for storage (explicit formatting to avoid locale issues)
+      const formattedBirthday = birthday 
+        ? formatDateAsDDMMYYYY(birthday)
+        : null;
+
       // Upsert user profile (creates if doesn't exist, updates if does)
       // This handles both email signup users (who have a profile) and OAuth users (who might not)
       const { error } = await supabase
@@ -42,10 +74,10 @@ export default function ProfileSetupScreen() {
           id: user.id,
           email: user.email,
           full_name: fullName,
-          birthday: birthday || null,
+          birthday: formattedBirthday,
           gender: gender || null,
+          avatar_url: avatarUrl || null,
           onboarding_completed: true,
-          style_quiz_completed: false,
         }, {
           onConflict: 'id',
         });
@@ -105,15 +137,88 @@ export default function ProfileSetupScreen() {
                   <Text className="text-sm text-neutral-700 mb-2 font-sans-medium">
                     Birthday (Optional)
                   </Text>
-                  <TextInput
-                    value={birthday}
-                    onChangeText={setBirthday}
-                    placeholder="DD/MM/YYYY"
-                    className="bg-neutral-50 border border-neutral-200 rounded-xl h-12 px-4 text-base"
-                  />
+                  <TouchableOpacity
+                    onPress={() => setShowDatePicker(true)}
+                    className="bg-neutral-50 border border-neutral-200 rounded-xl h-12 px-4 flex-row items-center justify-between"
+                  >
+                    <Text className={`text-base ${birthday ? 'text-neutral-900' : 'text-neutral-400'}`}>
+                      {birthday 
+                        ? formatDateAsDDMMYYYY(birthday)
+                        : 'DD/MM/YYYY'}
+                    </Text>
+                    <Text className="text-neutral-400 text-lg">▼</Text>
+                  </TouchableOpacity>
                   <Text className="text-xs text-neutral-500 mt-1">
                     We'll send you special birthday offers
                   </Text>
+                  
+                  {/* Date Picker Modal */}
+                  {Platform.OS === 'ios' ? (
+                    <Modal
+                      visible={showDatePicker}
+                      transparent={true}
+                      animationType="slide"
+                      onRequestClose={() => setShowDatePicker(false)}
+                    >
+                      <View className="flex-1 bg-black/50 justify-end">
+                        <TouchableOpacity
+                          className="flex-1"
+                          activeOpacity={1}
+                          onPress={() => setShowDatePicker(false)}
+                        />
+                        <View className="bg-white rounded-t-3xl p-6" style={{ paddingBottom: Platform.OS === 'ios' ? 34 : 24 }}>
+                          <View className="w-12 h-1 bg-neutral-200 rounded-full self-center mb-4" />
+                          <Text className="text-lg font-serif-bold text-neutral-900 mb-4 text-center">
+                            Select Your Birthday
+                          </Text>
+                          <DateTimePicker
+                            value={birthday || new Date()}
+                            mode="date"
+                            display="spinner"
+                            maximumDate={new Date()}
+                            onChange={(event, selectedDate) => {
+                              if (event.type === 'set' && selectedDate) {
+                                setBirthday(selectedDate);
+                              }
+                            }}
+                            style={{ backgroundColor: 'white' }}
+                          />
+                          <View className="flex-row gap-3 mt-4">
+                            <TouchableOpacity
+                              onPress={() => {
+                                setBirthday(null);
+                                setShowDatePicker(false);
+                              }}
+                              className="flex-1 border-2 border-neutral-200 rounded-xl h-12 items-center justify-center"
+                            >
+                              <Text className="text-neutral-700 font-sans-medium">Clear</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => setShowDatePicker(false)}
+                              className="flex-1 bg-primary-500 rounded-xl h-12 items-center justify-center"
+                            >
+                              <Text className="text-white font-sans-semibold">Done</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      </View>
+                    </Modal>
+                  ) : (
+                    showDatePicker && (
+                      <DateTimePicker
+                        value={birthday || new Date()}
+                        mode="date"
+                        display="default"
+                        maximumDate={new Date()}
+                        onChange={(event, selectedDate) => {
+                          setShowDatePicker(false);
+                          if (event.type === 'set' && selectedDate) {
+                            setBirthday(selectedDate);
+                          }
+                        }}
+                      />
+                    )
+                  )}
                 </View>
 
                 {/* Gender */}

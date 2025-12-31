@@ -2,6 +2,7 @@ import { useEffect, useCallback, useRef } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { View, ActivityIndicator, Text } from 'react-native';
 import { supabase } from '@/lib/supabase';
+import { storage } from '@/lib/storage';
 import * as Linking from 'expo-linking';
 
 /**
@@ -118,30 +119,44 @@ export default function CallbackScreen() {
       console.log('✅ OAuth complete for user:', userId);
 
       // Ensure a row exists in public.users for OAuth users (best-effort; depends on RLS)
+      // IMPORTANT: do NOT upsert completion flags here; it would reset old users.
       const { data: authUserData } = await supabase.auth.getUser();
+      const authUser = authUserData.user;
       const authEmail =
-        authUserData.user?.email ??
-        (authUserData.user?.user_metadata as any)?.email ??
+        authUser?.email ??
+        (authUser?.user_metadata as any)?.email ??
         undefined;
 
-      if (!authEmail) {
-        console.error('⚠️ Cannot upsert public.users because email is missing (email column is NOT NULL).');
-      }
+      // Extract avatar URL from OAuth provider metadata
+      const extractAvatarUrl = (user: any): string | undefined => {
+        const metadata = user?.user_metadata || {};
+        return metadata.avatar_url || metadata.picture || metadata.picture_url || undefined;
+      };
+      const avatarUrl = authUser ? extractAvatarUrl(authUser) : undefined;
 
-      const { error: upsertError } = await supabase
+      const { data: existing, error: selectError } = await supabase
         .from('users')
-        .upsert(
-          {
+        .select('id')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (!existing) {
+        if (selectError) console.error('⚠️ users select error (continuing):', selectError);
+        if (!authEmail) {
+          console.error('⚠️ Cannot create users row: missing email (email is NOT NULL).');
+        } else {
+          const { error: insertError } = await supabase.from('users').insert({
             id: userId,
-            ...(authEmail ? { email: authEmail } : {}),
+            email: authEmail,
+            avatar_url: avatarUrl ?? null,
             onboarding_completed: false,
             style_quiz_completed: false,
-          },
-          { onConflict: 'id' }
-        );
+          });
 
-      if (upsertError) {
-        console.error('⚠️ Failed to upsert public.users row (check RLS/policies):', upsertError);
+          if (insertError) {
+            console.error('⚠️ Failed to insert public.users row (check RLS/policies):', insertError);
+          }
+        }
       }
 
       // Check if user profile exists
@@ -153,18 +168,31 @@ export default function CallbackScreen() {
 
       console.log('📍 Profile check:', profile ? 'found' : 'not found');
 
+      // If preferences exist, user has progressed past setup; skip profile-setup
+      const { data: prefs } = await supabase
+        .from('user_preferences')
+        .select('user_id')
+        .eq('user_id', userId)
+        .maybeSingle();
+      const hasPrefs = !!prefs;
+
+      await Promise.all([
+        storage.setProfileOnboardingCompleted(!!profile?.onboarding_completed || hasPrefs),
+        storage.setStyleQuizCompleted(!!profile?.style_quiz_completed || hasPrefs),
+      ]);
+
       if (!profile) {
         // New user - go to profile setup
         console.log('➡️ Navigating to profile setup (no profile)');
-        router.replace('/(auth)/profile-setup');
+        router.replace(hasPrefs ? '/(tabs)' : '/(auth)/profile-setup');
       } else if (!profile.onboarding_completed) {
         // Profile exists but not completed
         console.log('➡️ Navigating to profile setup (incomplete)');
-        router.replace('/(auth)/profile-setup');
+        router.replace(hasPrefs ? '/(tabs)' : '/(auth)/profile-setup');
       } else if (!profile.style_quiz_completed) {
         // Existing user without quiz
         console.log('➡️ Navigating to style quiz');
-        router.replace('/(auth)/style-quiz');
+        router.replace(hasPrefs ? '/(tabs)' : '/(auth)/style-quiz');
       } else {
         // Everything complete
         console.log('➡️ Navigating to main app');

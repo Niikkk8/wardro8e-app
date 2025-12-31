@@ -58,16 +58,30 @@ export default function Index() {
         .eq('id', user.id)
         .maybeSingle(); // Returns null instead of throwing error
 
+      // If preferences exist, user has progressed past setup; skip profile-setup
+      const { data: prefs } = await supabase
+        .from('user_preferences')
+        .select('user_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      const hasPrefs = !!prefs;
+      const profileOnboardingCompleted = !!profile?.onboarding_completed || hasPrefs;
+      const styleQuizCompleted = !!profile?.style_quiz_completed || hasPrefs;
+      await Promise.all([
+        storage.setProfileOnboardingCompleted(profileOnboardingCompleted),
+        storage.setStyleQuizCompleted(styleQuizCompleted),
+      ]);
+
       if (error) {
         console.error('❌ Profile fetch error:', error);
-        setDestination('/(auth)/profile-setup');
+        setDestination(hasPrefs ? '/(tabs)' : '/(auth)/profile-setup');
         setChecking(false);
         return;
       }
 
       if (!profile) {
         console.log('✅ No profile found - showing profile setup');
-        setDestination('/(auth)/profile-setup');
+        setDestination(hasPrefs ? '/(tabs)' : '/(auth)/profile-setup');
         setChecking(false);
         return;
       }
@@ -80,10 +94,10 @@ export default function Index() {
 
       if (!profile.onboarding_completed) {
         console.log('✅ Profile not completed - showing profile setup');
-        setDestination('/(auth)/profile-setup');
+        setDestination(hasPrefs ? '/(tabs)' : '/(auth)/profile-setup');
       } else if (!profile.style_quiz_completed) {
         console.log('✅ Quiz not completed - showing style quiz');
-        setDestination('/(auth)/style-quiz');
+        setDestination(hasPrefs ? '/(tabs)' : '/(auth)/style-quiz');
       } else {
         console.log('✅ Everything complete - going to main app');
         setDestination('/(tabs)');

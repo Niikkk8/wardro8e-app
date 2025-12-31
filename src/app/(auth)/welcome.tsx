@@ -1,10 +1,13 @@
-import { View, Text, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, Alert, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
+import { storage } from '@/lib/storage';
 import { useState, useEffect, useMemo } from 'react';
 import * as WebBrowser from 'expo-web-browser';
 import Constants from 'expo-constants';
+
+const GOOGLE_FAVICON_URI = 'https://www.google.com/s2/favicons?domain=google.com&sz=128';
 
 // Complete the OAuth session in the browser
 WebBrowser.maybeCompleteAuthSession();
@@ -39,21 +42,41 @@ export default function AuthWelcomeScreen() {
   const redirectTo = useMemo(() => getRedirectTo(), []);
   const isExpoGo = Constants.appOwnership === 'expo';
 
-  const ensureUsersRow = async (userId: string, email?: string | null) => {
-    const { error: upsertError } = await supabase
-      .from('users')
-      .upsert(
-        {
-          id: userId,
-          email: email ?? undefined,
-          onboarding_completed: false,
-          style_quiz_completed: false,
-        },
-        { onConflict: 'id' }
-      );
+  const extractAvatarUrl = (user: any): string | undefined => {
+    // Check various possible locations for avatar URL in OAuth providers
+    const metadata = user?.user_metadata || {};
+    return metadata.avatar_url || metadata.picture || metadata.picture_url || undefined;
+  };
 
-    if (upsertError) {
-      console.error('⚠️ Failed to upsert public.users row (check RLS/policies):', upsertError);
+  const ensureUsersRow = async (userId: string, email?: string | null, user?: any) => {
+    const avatarUrl = user ? extractAvatarUrl(user) : undefined;
+
+    // IMPORTANT: do NOT upsert completion flags here.
+    // Old users would get their onboarding/style flags overwritten back to false.
+    const { data: existing, error: selectError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (existing) return;
+    if (selectError) console.error('⚠️ users select error (continuing):', selectError);
+
+    if (!email) {
+      console.error('⚠️ Cannot create users row: missing email (email is NOT NULL).');
+      return;
+    }
+
+    const { error: insertError } = await supabase.from('users').insert({
+      id: userId,
+      email,
+      avatar_url: avatarUrl ?? null,
+      onboarding_completed: false,
+      style_quiz_completed: false,
+    });
+
+    if (insertError) {
+      console.error('⚠️ Failed to insert public.users row (check RLS/policies):', insertError);
     }
   };
 
@@ -68,7 +91,7 @@ export default function AuthWelcomeScreen() {
       const { data, error } = await supabase.auth.exchangeCodeForSession(code);
       if (error) throw error;
       if (!data.user) throw new Error('No user after exchanging code');
-      await ensureUsersRow(data.user.id, data.user.email);
+      await ensureUsersRow(data.user.id, data.user.email, data.user);
       await navigateBasedOnProfile(data.user.id);
       return;
     }
@@ -81,7 +104,7 @@ export default function AuthWelcomeScreen() {
       });
       if (error) throw error;
       if (!data.user) throw new Error('No user after setting session');
-      await ensureUsersRow(data.user.id, data.user.email);
+      await ensureUsersRow(data.user.id, data.user.email, data.user);
       await navigateBasedOnProfile(data.user.id);
       return;
     }
@@ -95,6 +118,13 @@ export default function AuthWelcomeScreen() {
   const navigateBasedOnProfile = async (userId: string) => {
     console.log('📍 Checking profile for user:', userId);
     
+    const { data: prefs } = await supabase
+      .from('user_preferences')
+      .select('user_id')
+      .eq('user_id', userId)
+      .maybeSingle();
+    const hasPrefs = !!prefs;
+
     const { data: profile } = await supabase
       .from('users')
       .select('*')
@@ -103,15 +133,21 @@ export default function AuthWelcomeScreen() {
 
     console.log('📍 Profile:', profile);
 
+    // Sync local storage flags on every successful auth routing decision
+    await Promise.all([
+      storage.setProfileOnboardingCompleted(!!profile?.onboarding_completed || hasPrefs),
+      storage.setStyleQuizCompleted(!!profile?.style_quiz_completed || hasPrefs),
+    ]);
+
     if (!profile) {
       console.log('➡️ No profile - going to profile setup');
-      router.replace('/(auth)/profile-setup');
+      router.replace(hasPrefs ? '/(tabs)' : '/(auth)/profile-setup');
     } else if (!profile.onboarding_completed) {
       console.log('➡️ Profile incomplete - going to profile setup');
-      router.replace('/(auth)/profile-setup');
+      router.replace(hasPrefs ? '/(tabs)' : '/(auth)/profile-setup');
     } else if (!profile.style_quiz_completed) {
       console.log('➡️ Quiz incomplete - going to style quiz');
-      router.replace('/(auth)/style-quiz');
+      router.replace(hasPrefs ? '/(tabs)' : '/(auth)/style-quiz');
     } else {
       console.log('➡️ All complete - going to tabs');
       router.replace('/(tabs)');
@@ -179,6 +215,8 @@ export default function AuthWelcomeScreen() {
         
         if (event === 'SIGNED_IN' && session?.user) {
           console.log('✅ User signed in via state change');
+          // Ensure user row exists with avatar_url if available
+          await ensureUsersRow(session.user.id, session.user.email, session.user);
           await navigateBasedOnProfile(session.user.id);
         }
       }
@@ -213,6 +251,10 @@ export default function AuthWelcomeScreen() {
             disabled={loading}
             className="bg-white border border-neutral-300 rounded-xl h-12 flex-row items-center justify-center"
           >
+            <Image
+              source={{ uri: GOOGLE_FAVICON_URI }}
+              style={{ width: 24, height: 24, marginRight: 8 }}
+            />
             <Text className="text-neutral-900 text-sm font-sans-medium">
               {loading ? 'Signing in...' : 'Continue with Google'}
             </Text>
