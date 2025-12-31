@@ -66,14 +66,16 @@ export default function StyleQuizScreen() {
 
       if (!user) throw new Error('No user found');
 
-      // Create user preferences
+      // Upsert user preferences (allows retaking quiz)
       const { error: prefError } = await supabase
         .from('user_preferences')
-        .insert({
+        .upsert({
           user_id: user.id,
           style_tags: selectedStyles,
           favorite_colors: selectedColors,
           pattern_preferences: selectedPatterns,
+        }, {
+          onConflict: 'user_id',
         });
 
       if (prefError) throw prefError;

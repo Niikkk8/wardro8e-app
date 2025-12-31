@@ -11,6 +11,14 @@ export default function Index() {
   const [destination, setDestination] = useState<string | null>(null);
 
   useEffect(() => {
+    // Wait for auth to finish loading before checking destination
+    if (authLoading) {
+      return;
+    }
+    
+    // Reset and check destination when auth state changes
+    setChecking(true);
+    setDestination(null);
     checkDestination();
   }, [user, authLoading]);
 
@@ -80,11 +88,12 @@ export default function Index() {
         console.log('✅ Everything complete - going to main app');
         setDestination('/(tabs)');
       }
+      
+      setChecking(false);
     } catch (error) {
       console.error('❌ Error checking destination:', error);
       // On any error, show onboarding (safest default)
       setDestination('/(onboarding)');
-    } finally {
       setChecking(false);
     }
   }

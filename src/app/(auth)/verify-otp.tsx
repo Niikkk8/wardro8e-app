@@ -3,6 +3,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { getApiBaseUrl } from '@/utils/api';
 
 export default function VerifyOTPScreen() {
   const router = useRouter();
@@ -99,7 +100,7 @@ export default function VerifyOTPScreen() {
       const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
 
       // Send new OTP via email
-      const response = await fetch('/api/send-otp', {
+      const response = await fetch(`${getApiBaseUrl()}/api/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, otp: newOtp }),

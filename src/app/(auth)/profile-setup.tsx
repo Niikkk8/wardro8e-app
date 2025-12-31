@@ -34,16 +34,21 @@ export default function ProfileSetupScreen() {
 
       if (!user) throw new Error('No user found');
 
-      // Update user profile
+      // Upsert user profile (creates if doesn't exist, updates if does)
+      // This handles both email signup users (who have a profile) and OAuth users (who might not)
       const { error } = await supabase
         .from('users')
-        .update({
+        .upsert({
+          id: user.id,
+          email: user.email,
           full_name: fullName,
           birthday: birthday || null,
           gender: gender || null,
           onboarding_completed: true,
-        })
-        .eq('id', user.id);
+          style_quiz_completed: false,
+        }, {
+          onConflict: 'id',
+        });
 
       if (error) throw error;
 

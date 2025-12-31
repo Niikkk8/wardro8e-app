@@ -2,161 +2,190 @@ import { View, Text, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import * as WebBrowser from 'expo-web-browser';
-import * as Linking from 'expo-linking';
+import Constants from 'expo-constants';
 
 // Complete the OAuth session in the browser
 WebBrowser.maybeCompleteAuthSession();
 
+function getRedirectTo() {
+  // Supabase OAuth does NOT work reliably in Expo Go because Supabase rejects exp:// redirects,
+  // and the Expo Auth Proxy flow requires an AuthSession-managed request (not Supabase's /authorize URL).
+  // The reliable approach is a development build / production build with a custom scheme deep link.
+  return 'wardro8e://callback';
+}
+
+function parseCodeFromUrl(url: string): string | null {
+  const query = url.split('?')[1]?.split('#')[0] ?? '';
+  if (!query) return null;
+  const params = new URLSearchParams(query);
+  return params.get('code');
+}
+
+function parseTokensFromUrlHash(url: string): { accessToken: string | null; refreshToken: string | null } {
+  const hash = url.split('#')[1] ?? '';
+  if (!hash) return { accessToken: null, refreshToken: null };
+  const params = new URLSearchParams(hash);
+  return {
+    accessToken: params.get('access_token'),
+    refreshToken: params.get('refresh_token'),
+  };
+}
+
 export default function AuthWelcomeScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const redirectTo = useMemo(() => getRedirectTo(), []);
+  const isExpoGo = Constants.appOwnership === 'expo';
 
-  useEffect(() => {
-    // Handle OAuth redirect when app returns from browser
-    const handleDeepLink = async (event: { url: string }) => {
-      try {
-        const url = event.url;
+  const ensureUsersRow = async (userId: string, email?: string | null) => {
+    const { error: upsertError } = await supabase
+      .from('users')
+      .upsert(
+        {
+          id: userId,
+          email: email ?? undefined,
+          onboarding_completed: false,
+          style_quiz_completed: false,
+        },
+        { onConflict: 'id' }
+      );
 
-        // Check if this is an OAuth callback
-        if (url.includes('callback') || url.includes('access_token')) {
-          // Parse URL manually (React Native compatible)
-          const urlParts = url.split('#')[1] || url.split('?')[1];
-          const params = new URLSearchParams(urlParts);
+    if (upsertError) {
+      console.error('⚠️ Failed to upsert public.users row (check RLS/policies):', upsertError);
+    }
+  };
 
-          const accessToken = params.get('access_token');
-          const refreshToken = params.get('refresh_token');
+  const completeOAuthFromRedirectUrl = async (redirectUrl: string) => {
+    console.log('📍 OAuth redirect URL:', redirectUrl);
 
-          if (accessToken && refreshToken) {
-            // Set the session
-            const { data, error } = await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
-            });
+    const code = parseCodeFromUrl(redirectUrl);
+    const { accessToken, refreshToken } = parseTokensFromUrlHash(redirectUrl);
 
-            if (error) {
-              console.error('Session error:', error);
-              Alert.alert('Error', 'Failed to complete sign in');
-              return;
-            }
+    if (code) {
+      console.log('✅ Found PKCE code, exchanging for session...');
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+      if (error) throw error;
+      if (!data.user) throw new Error('No user after exchanging code');
+      await ensureUsersRow(data.user.id, data.user.email);
+      await navigateBasedOnProfile(data.user.id);
+      return;
+    }
 
-            // Navigate based on user profile
-            if (data.user) {
-              const { data: profile } = await supabase
-                .from('users')
-                .select('*')
-                .eq('id', data.user.id)
-                .maybeSingle();
+    if (accessToken && refreshToken) {
+      console.log('✅ Found tokens, setting session...');
+      const { data, error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+      if (error) throw error;
+      if (!data.user) throw new Error('No user after setting session');
+      await ensureUsersRow(data.user.id, data.user.email);
+      await navigateBasedOnProfile(data.user.id);
+      return;
+    }
 
-              if (!profile) {
-                router.replace('/(auth)/profile-setup');
-              } else if (!profile.style_quiz_completed) {
-                router.replace('/(auth)/style-quiz');
-              } else {
-                router.replace('/(tabs)');
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Deep link error:', error);
-      }
-    };
+    throw new Error('Missing code/tokens in redirect URL');
+  };
 
-    // Listen for deep links
-    const subscription = Linking.addEventListener('url', handleDeepLink);
+  /**
+   * Navigate user based on their profile completion status
+   */
+  const navigateBasedOnProfile = async (userId: string) => {
+    console.log('📍 Checking profile for user:', userId);
+    
+    const { data: profile } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
 
-    // Check if app was opened via deep link
-    Linking.getInitialURL().then((url) => {
-      if (url) {
-        handleDeepLink({ url });
-      }
-    });
+    console.log('📍 Profile:', profile);
 
-    return () => {
-      subscription.remove();
-    };
-  }, [router]);
+    if (!profile) {
+      console.log('➡️ No profile - going to profile setup');
+      router.replace('/(auth)/profile-setup');
+    } else if (!profile.onboarding_completed) {
+      console.log('➡️ Profile incomplete - going to profile setup');
+      router.replace('/(auth)/profile-setup');
+    } else if (!profile.style_quiz_completed) {
+      console.log('➡️ Quiz incomplete - going to style quiz');
+      router.replace('/(auth)/style-quiz');
+    } else {
+      console.log('➡️ All complete - going to tabs');
+      router.replace('/(tabs)');
+    }
+  };
 
   const handleGoogleSignIn = async () => {
     try {
       setLoading(true);
+      console.log('📍 Starting Google OAuth...');
+      console.log('📍 Using redirectTo:', redirectTo);
 
-      // Create redirect URL using the app scheme
-      const redirectUrl = Linking.createURL('/(auth)/callback');
-      console.log('Redirect URL:', redirectUrl);
+      if (isExpoGo) {
+        // This prevents the loop where users keep ending up on a browser error page.
+        throw new Error(
+          'Google OAuth requires a Development Build (not Expo Go). Run `npx expo run:android` and try again.'
+        );
+      }
 
+      // Start the OAuth flow WITH explicit redirectTo (Expo Auth Proxy)
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: redirectUrl,
-          skipBrowserRedirect: false,
+          skipBrowserRedirect: true,
+          redirectTo,
         },
       });
 
       if (error) {
-        console.error('OAuth error:', error);
+        console.error('❌ OAuth error:', error);
         throw error;
       }
 
-      if (data?.url) {
-        console.log('Opening OAuth URL:', data.url);
+      if (!data.url) {
+        throw new Error('No OAuth URL returned');
+      }
 
-        // Open the OAuth URL in browser
-        const result = await WebBrowser.openAuthSessionAsync(
-          data.url,
-          redirectUrl
-        );
+      console.log('📍 Opening OAuth URL...');
 
-        console.log('OAuth result:', result.type);
+      // In dev/prod builds, use a custom scheme deep link: wardro8e://callback
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo, {
+        showInRecents: true,
+        preferEphemeralSession: false,
+      });
 
-        if (result.type === 'success' && result.url) {
-          // Parse the callback URL (React Native compatible)
-          const urlParts = result.url.split('#')[1] || result.url.split('?')[1];
-          const params = new URLSearchParams(urlParts);
-          const accessToken = params.get('access_token');
-          const refreshToken = params.get('refresh_token');
+      console.log('📍 WebBrowser result:', JSON.stringify(result, null, 2));
 
-          if (accessToken && refreshToken) {
-            // Set session
-            const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
-            });
-
-            if (sessionError) throw sessionError;
-
-            // Check user profile and navigate
-            if (sessionData.user) {
-              const { data: profile } = await supabase
-                .from('users')
-                .select('*')
-                .eq('id', sessionData.user.id)
-                .maybeSingle();
-
-              if (!profile) {
-                router.replace('/(auth)/profile-setup');
-              } else if (!profile.style_quiz_completed) {
-                router.replace('/(auth)/style-quiz');
-              } else {
-                router.replace('/(tabs)');
-              }
-            }
-          }
-        } else if (result.type === 'cancel') {
-          console.log('User cancelled OAuth');
-        } else {
-          console.log('OAuth failed:', result);
-        }
+      // Use the returned URL directly (most reliable on Android).
+      if (result.type === 'success' && result.url) {
+        await completeOAuthFromRedirectUrl(result.url);
       }
     } catch (error: any) {
-      console.error('Google OAuth error:', error);
+      console.error('❌ Google OAuth error:', error);
       Alert.alert('Error', error.message || 'Failed to sign in with Google');
     } finally {
       setLoading(false);
     }
   };
+
+  // Listen for auth state changes (backup method)
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('📍 Auth state changed:', event);
+        
+        if (event === 'SIGNED_IN' && session?.user) {
+          console.log('✅ User signed in via state change');
+          await navigateBasedOnProfile(session.user.id);
+        }
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -185,7 +214,7 @@ export default function AuthWelcomeScreen() {
             className="bg-white border border-neutral-300 rounded-xl h-12 flex-row items-center justify-center"
           >
             <Text className="text-neutral-900 text-sm font-sans-medium">
-              Continue with Google
+              {loading ? 'Signing in...' : 'Continue with Google'}
             </Text>
           </TouchableOpacity>
 
@@ -224,4 +253,3 @@ export default function AuthWelcomeScreen() {
     </SafeAreaView>
   );
 }
-

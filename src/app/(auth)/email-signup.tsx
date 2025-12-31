@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { getApiBaseUrl } from '@/utils/api';
 
 export default function EmailSignupScreen() {
   const router = useRouter();
@@ -34,7 +35,7 @@ export default function EmailSignupScreen() {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
       // Send OTP via email
-      const response = await fetch('/api/send-otp', {
+      const response = await fetch(`${getApiBaseUrl()}/api/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.toLowerCase(), otp }),

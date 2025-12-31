@@ -10,11 +10,17 @@
       [
         "expo-router",
         {
-          "origin": "https://wardro8e.app"
+          "origin": "https://wardro8e.com"
         }
       ]
     ],
-    "name": "wardro8e-app",
-    "slug": "wardro8e-app"
+    "name": "wardro8e",
+    "slug": "wardro8e",
+    "android": {
+      "package": "com.anonymous.wardro8e"
+    },
+    "ios": {
+      "bundleIdentifier": "com.anonymous.wardro8e"
+    }
   }
 }

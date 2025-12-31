@@ -27,15 +27,23 @@ export default function EmailLoginScreen() {
       if (error) throw error;
 
       // Check user profile
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from('users')
         .select('*')
         .eq('id', data.user?.id)
-        .single();
+        .maybeSingle();
 
-      if (!profile || !profile.style_quiz_completed) {
+      if (!profile) {
+        // User doesn't have a profile - go to profile setup
+        router.replace('/(auth)/profile-setup');
+      } else if (!profile.onboarding_completed) {
+        // Profile not completed - go to profile setup
+        router.replace('/(auth)/profile-setup');
+      } else if (!profile.style_quiz_completed) {
+        // Quiz not completed - go to style quiz
         router.replace('/(auth)/style-quiz');
       } else {
+        // Everything complete - go to main app
         router.replace('/(tabs)');
       }
     } catch (error: any) {
