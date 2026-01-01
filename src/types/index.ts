@@ -43,3 +43,32 @@ export interface StyleQuizData {
   brands?: string[];
 }
 
+export interface Product {
+  id: string;
+  brand_id?: string | null;
+  title: string;
+  description: string;
+  price: number;
+  sale_price?: number | null;
+  category: string;
+  subcategory?: string | null;
+  attributes: {
+    colors?: string[];
+    pattern?: string;
+    materials?: string[];
+    size_range?: string[];
+  };
+  image_urls: string[];
+  embedding?: number[] | null;
+  stock_quantity?: number;
+  is_active: boolean;
+  source_platform?: string;
+  source_brand_name?: string;
+  affiliate_url?: string;
+  images_are_external?: boolean;
+  is_featured?: boolean;
+  click_count?: number;
+  created_at: string;
+  updated_at?: string;
+}
+

@@ -2,11 +2,16 @@ import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { theme } from '../../styles/theme';
 import { typography } from '../../styles/typography';
 import MasonryLayout from '../../components/layouts/MasonryLayout';
 
 export default function HomePage() {
+  const handleProductPress = (productId: string) => {
+    router.push(`/product/${productId}`);
+  };
+
   return (
     <SafeAreaView 
       edges={['top']} 
@@ -52,7 +57,7 @@ export default function HomePage() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ padding: theme.spacing.lg }}
       >
-        <MasonryLayout />
+        <MasonryLayout onProductPress={handleProductPress} />
       </ScrollView>
     </SafeAreaView>
   );
