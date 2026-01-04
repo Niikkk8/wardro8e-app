@@ -48,6 +48,71 @@ CREATE INDEX IF NOT EXISTS idx_products_source_platform ON products(source_platf
 CREATE INDEX IF NOT EXISTS idx_products_source_brand ON products(source_brand_name);
 CREATE INDEX IF NOT EXISTS idx_products_is_featured ON products(is_featured);
 CREATE INDEX IF NOT EXISTS idx_products_affiliate_url ON products(affiliate_url);
+
+-- =====================================================
+-- STEP 4: Add high-frequency filter columns
+-- =====================================================
+-- These are filtered in almost every query (discovery-first approach)
+
+ALTER TABLE products 
+ADD COLUMN IF NOT EXISTS gender VARCHAR(20),
+ADD COLUMN IF NOT EXISTS colors TEXT[],
+ADD COLUMN IF NOT EXISTS size_range TEXT[],
+ADD COLUMN IF NOT EXISTS sale_price NUMERIC(10,2);
+
+-- =====================================================
+-- STEP 5: Add medium-frequency columns (optional but helpful)
+-- =====================================================
+-- Frequently used for personalization and filtering
+
+ALTER TABLE products 
+ADD COLUMN IF NOT EXISTS fit_type VARCHAR(50),
+ADD COLUMN IF NOT EXISTS style TEXT[],
+ADD COLUMN IF NOT EXISTS occasion TEXT[],
+ADD COLUMN IF NOT EXISTS season TEXT[];
+
+-- =====================================================
+-- STEP 6: Create indexes for optimal query performance
+-- =====================================================
+
+CREATE INDEX IF NOT EXISTS idx_products_gender ON products(gender);
+CREATE INDEX IF NOT EXISTS idx_products_colors ON products USING GIN(colors);
+CREATE INDEX IF NOT EXISTS idx_products_size_range ON products USING GIN(size_range);
+CREATE INDEX IF NOT EXISTS idx_products_fit_type ON products(fit_type);
+CREATE INDEX IF NOT EXISTS idx_products_style ON products USING GIN(style);
+CREATE INDEX IF NOT EXISTS idx_products_occasion ON products USING GIN(occasion);
+CREATE INDEX IF NOT EXISTS idx_products_season ON products USING GIN(season);
+CREATE INDEX IF NOT EXISTS idx_products_sale_price ON products(sale_price) WHERE sale_price IS NOT NULL;
+
+-- =====================================================
+-- STEP 7: Add GIN indexes for JSONB category-specific fields
+-- =====================================================
+-- These fields remain in attributes JSONB:
+-- pattern, materials, sleeve_type, neck_type, length, waist_type, closure_type, care_instructions
+
+CREATE INDEX IF NOT EXISTS idx_products_attributes_pattern 
+ON products USING GIN ((attributes->'pattern'));
+
+CREATE INDEX IF NOT EXISTS idx_products_attributes_materials 
+ON products USING GIN ((attributes->'materials'));
+
+CREATE INDEX IF NOT EXISTS idx_products_attributes_sleeve_type 
+ON products USING GIN ((attributes->'sleeve_type'));
+
+CREATE INDEX IF NOT EXISTS idx_products_attributes_neck_type 
+ON products USING GIN ((attributes->'neck_type'));
+
+CREATE INDEX IF NOT EXISTS idx_products_attributes_length 
+ON products USING GIN ((attributes->'length'));
+
+CREATE INDEX IF NOT EXISTS idx_products_attributes_waist_type 
+ON products USING GIN ((attributes->'waist_type'));
+
+CREATE INDEX IF NOT EXISTS idx_products_attributes_closure_type 
+ON products USING GIN ((attributes->'closure_type'));
+
+CREATE INDEX IF NOT EXISTS idx_products_attributes_care_instructions 
+ON products USING GIN ((attributes->'care_instructions'));
 ```
 
 ---
@@ -63,22 +128,48 @@ After running the migration, your products table will look like this:
 | `title` | VARCHAR(255) | Yes | Product title |
 | `description` | TEXT | Yes | Product description |
 | `price` | DECIMAL(10,2) | Yes | Product price |
-| `sale_price` | DECIMAL(10,2) | No | Sale price |
+| **`sale_price`** | NUMERIC(10,2) | No | Discounted price (for showing discounts) |
 | `category` | VARCHAR(100) | Yes | Category |
 | `subcategory` | VARCHAR(100) | No | Subcategory |
-| `attributes` | JSONB | Yes | Colors, pattern, materials, sizes |
-| `image_urls` | TEXT[] | Yes | Image URLs (external or uploaded) |
+| **`gender`** | VARCHAR(20) | **Yes** | 'men', 'women', 'unisex', 'kids' (high-frequency filter) |
+| **`colors`** | TEXT[] | **Yes** | Array: ["Black", "White"] (high-frequency filter) |
+| **`size_range`** | TEXT[] | **Yes** | Array: ["S", "M", "L"] (high-frequency filter) |
+| **`fit_type`** | VARCHAR(50) | No | Regular Fit, Slim Fit, etc. (medium-frequency filter) |
+| **`style`** | TEXT[] | No | Array: Casual, Formal, Sporty, etc. (medium-frequency filter) |
+| **`occasion`** | TEXT[] | No | Array: Casual, Formal, Party, etc. (medium-frequency filter) |
+| **`season`** | TEXT[] | No | Array: All Season, Summer, Winter, etc. (medium-frequency filter) |
+| `attributes` | JSONB | Yes | Pattern, materials, sleeve_type, neck_type, length, waist_type, closure_type, care_instructions |
+| `image_urls` | TEXT[] | Yes | Image URLs (from Supabase Storage) |
 | `embedding` | VECTOR(512) | No | CLIP embedding (generated async) |
 | `stock_quantity` | INTEGER | No | Not needed for affiliate |
 | `is_active` | BOOLEAN | Yes | Default true |
 | **`source_platform`** | VARCHAR(50) | Yes | 'myntra', 'ajio', 'amazon', etc. |
 | **`source_brand_name`** | VARCHAR(255) | Yes | Brand name as text |
 | **`affiliate_url`** | TEXT | Yes | Deep link to product |
-| **`images_are_external`** | BOOLEAN | Yes | TRUE if using external image URLs |
+| **`images_are_external`** | BOOLEAN | Yes | FALSE (images stored in Supabase Storage) |
 | **`is_featured`** | BOOLEAN | No | For homepage placement |
 | **`click_count`** | INTEGER | No | Track clicks |
 | `created_at` | TIMESTAMP | Auto | Creation time |
 | **`updated_at`** | TIMESTAMP | Auto | Last update time |
+
+**Why This Schema?**
+- **High-frequency filters** (`gender`, `colors`, `size_range`) are columns for optimal query performance (10-50x faster than JSONB)
+- **Medium-frequency filters** (`fit_type`, `style`, `occasion`, `season`) are columns for personalization
+- **Category-specific fields** remain in JSONB for flexibility
+
+**Attributes JSONB Structure (Slimmer):**
+```json
+{
+  "pattern": "Solid",
+  "materials": ["Cotton", "Polyester"],
+  "sleeve_type": "Full Sleeve",        // For tops/dresses
+  "neck_type": "Round Neck",            // For tops/dresses
+  "length": "Regular",                  // For various categories
+  "waist_type": "High Waist",          // For bottoms
+  "closure_type": "Button",             // For various categories
+  "care_instructions": ["Machine Wash", "Do Not Bleach"]
+}
+```
 
 ---
 
@@ -97,284 +188,35 @@ PYTHON_SERVICE_URL=http://localhost:8000
 
 ---
 
-## Step 4: Admin Auth Wall (React Native)
+## Step 4: Admin Auth Implementation
 
-Simple login screen that checks against env credentials:
+The admin panel uses static credential authentication via environment variables. The login page and auth middleware are already implemented in the codebase:
 
-```typescript
-// app/(admin)/login.tsx
-import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert } from 'react-native';
-import { router } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-export default function AdminLogin() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleLogin = async () => {
-    setLoading(true);
-    
-    try {
-      // Call your API to verify credentials
-      const res = await fetch('/api/admin/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      });
-      
-      const data = await res.json();
-      
-      if (res.ok && data.success) {
-        // Store admin session
-        await AsyncStorage.setItem('admin_token', data.token);
-        router.replace('/(admin)/dashboard');
-      } else {
-        Alert.alert('Error', 'Invalid credentials');
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Login failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <View className="flex-1 bg-background p-6 justify-center">
-      <Text className="text-2xl font-bold text-white mb-8 text-center">
-        Admin Panel
-      </Text>
-      
-      <TextInput
-        className="bg-muted text-white p-4 rounded-lg mb-4"
-        placeholder="Username"
-        placeholderTextColor="#666"
-        value={username}
-        onChangeText={setUsername}
-        autoCapitalize="none"
-      />
-      
-      <TextInput
-        className="bg-muted text-white p-4 rounded-lg mb-6"
-        placeholder="Password"
-        placeholderTextColor="#666"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
-      
-      <TouchableOpacity
-        className="bg-primary p-4 rounded-lg"
-        onPress={handleLogin}
-        disabled={loading}
-      >
-        <Text className="text-white text-center font-semibold">
-          {loading ? 'Logging in...' : 'Login'}
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-```
+- **Login Page**: `app/admin/login/page.tsx`
+- **Auth Middleware**: `lib/auth.ts` (uses cookies for session management)
+- **Protected Routes**: `app/admin/(protected)/layout.tsx`
 
 ---
 
-## Step 5: Admin Auth API (Next.js)
+## Step 5: Admin Auth API
 
-```typescript
-// app/api/admin/auth/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { sign } from 'jsonwebtoken';
-
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret';
-
-export async function POST(req: NextRequest) {
-  try {
-    const { username, password } = await req.json();
-
-    // Simple credential check
-    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-      // Generate a simple token
-      const token = sign(
-        { role: 'admin', username },
-        JWT_SECRET,
-        { expiresIn: '7d' }
-      );
-
-      return NextResponse.json({ success: true, token });
-    }
-
-    return NextResponse.json(
-      { success: false, message: 'Invalid credentials' },
-      { status: 401 }
-    );
-  } catch (error) {
-    return NextResponse.json(
-      { success: false, message: 'Server error' },
-      { status: 500 }
-    );
-  }
-}
-```
+The admin authentication API is implemented in `app/api/admin/auth/route.ts`. It uses static credentials from environment variables and manages sessions via HTTP-only cookies for security.
 
 ---
 
 ## Step 6: Admin Products API
 
-```typescript
-// app/api/admin/products/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { verify } from 'jsonwebtoken';
-import { createClient } from '@supabase/supabase-js';
+The products API is implemented in `app/api/admin/products/route.ts`. It includes:
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret';
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+- **GET**: List products with pagination
+- **POST**: Create new products with validation for:
+  - Required fields (title, description, price, category, gender, colors, size_range, etc.)
+  - High-frequency filter fields (gender, colors, size_range as top-level columns)
+  - Attributes (pattern, materials in JSONB)
+  - Image uploads to Supabase Storage
+  - Async CLIP embedding generation
 
-// Verify admin token
-function verifyAdmin(req: NextRequest): boolean {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return false;
-  
-  try {
-    const token = authHeader.slice(7);
-    const decoded = verify(token, JWT_SECRET) as { role: string };
-    return decoded.role === 'admin';
-  } catch {
-    return false;
-  }
-}
-
-// GET - List products
-export async function GET(req: NextRequest) {
-  if (!verifyAdmin(req)) {
-    return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-  }
-
-  const { searchParams } = new URL(req.url);
-  const page = parseInt(searchParams.get('page') || '1');
-  const limit = parseInt(searchParams.get('limit') || '20');
-  const offset = (page - 1) * limit;
-
-  const { data, error, count } = await supabase
-    .from('products')
-    .select('*', { count: 'exact' })
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
-
-  if (error) {
-    return NextResponse.json({ message: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ products: data, total: count, page, limit });
-}
-
-// POST - Create product
-export async function POST(req: NextRequest) {
-  if (!verifyAdmin(req)) {
-    return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-  }
-
-  try {
-    const body = await req.json();
-
-    // Validate required fields
-    const required = ['title', 'description', 'price', 'category', 'source_platform', 'source_brand_name', 'affiliate_url', 'image_urls'];
-    for (const field of required) {
-      if (!body[field]) {
-        return NextResponse.json({ message: `${field} is required` }, { status: 400 });
-      }
-    }
-
-    // Validate attributes
-    const attributes = body.attributes || {};
-    if (!attributes.colors?.length || !attributes.pattern || !attributes.materials?.length || !attributes.size_range?.length) {
-      return NextResponse.json({ message: 'Colors, pattern, materials, and sizes are required in attributes' }, { status: 400 });
-    }
-
-    // Validate price
-    if (typeof body.price !== 'number' || body.price <= 0) {
-      return NextResponse.json({ message: 'Valid price is required' }, { status: 400 });
-    }
-
-    // Validate image_urls
-    if (!Array.isArray(body.image_urls) || body.image_urls.length === 0) {
-      return NextResponse.json({ message: 'At least one image URL is required' }, { status: 400 });
-    }
-
-    // Insert product
-    const { data: product, error } = await supabase
-      .from('products')
-      .insert({
-        brand_id: null, // No brand for affiliate products
-        title: body.title.trim(),
-        description: body.description.trim(),
-        price: body.price,
-        sale_price: body.sale_price || null,
-        category: body.category,
-        subcategory: body.subcategory || null,
-        attributes: body.attributes,
-        image_urls: body.image_urls,
-        source_platform: body.source_platform,
-        source_brand_name: body.source_brand_name.trim(),
-        affiliate_url: body.affiliate_url.trim(),
-        images_are_external: body.images_are_external ?? true,
-        is_featured: body.is_featured ?? false,
-        is_active: body.is_active ?? true,
-        stock_quantity: 0,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      return NextResponse.json({ message: error.message }, { status: 500 });
-    }
-
-    // Generate embedding async (don't wait)
-    if (process.env.PYTHON_SERVICE_URL && product.image_urls?.length > 0) {
-      generateEmbedding(product.id, product.image_urls[0]).catch(console.error);
-    }
-
-    return NextResponse.json({ message: 'Product created', product }, { status: 201 });
-  } catch (error) {
-    console.error('Error creating product:', error);
-    return NextResponse.json({ message: 'Server error' }, { status: 500 });
-  }
-}
-
-// Async embedding generation
-async function generateEmbedding(productId: string, imageUrl: string) {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
-
-    const res = await fetch(`${process.env.PYTHON_SERVICE_URL}/generate-embedding`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_url: imageUrl }),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-
-    if (res.ok) {
-      const { embedding } = await res.json();
-      await supabase
-        .from('products')
-        .update({ embedding })
-        .eq('id', productId);
-      console.log(`Embedding generated for product ${productId}`);
-    }
-  } catch (error) {
-    console.error(`Embedding generation failed for ${productId}:`, error);
-  }
-}
-```
+The API uses session-based authentication via `verifyAdminSession` helper from `lib/auth.ts`.
 
 ---
 
@@ -396,17 +238,33 @@ export interface AffiliateProductInput {
   category: string;
   subcategory?: string;
 
-  // Attributes
+  // High-frequency filter fields (as columns - filtered in almost every query)
+  gender: 'men' | 'women' | 'unisex' | 'kids';
+  colors: string[];
+  size_range: string[];
+
+  // Medium-frequency filter fields (as columns - for personalization)
+  fit_type?: string;
+  style?: string[];
+  occasion?: string[];
+  season?: string[];
+
+  // Attributes (JSONB - category-specific and less frequently filtered)
   attributes: {
-    colors: string[];
     pattern: string;
     materials: string[];
-    size_range: string[];
+    // Category-specific fields (in JSONB)
+    sleeve_type?: string;        // For tops/dresses
+    neck_type?: string;           // For tops/dresses
+    length?: string;              // For various categories
+    waist_type?: string;          // For bottoms
+    closure_type?: string;        // For various categories
+    care_instructions?: string[]; // Array of care instructions
   };
 
   // Images
-  image_urls: string[]; // External URLs from source platform
-  images_are_external: boolean;
+  image_urls: string[]; // URLs from Supabase Storage
+  images_are_external: boolean; // FALSE (stored in Supabase)
 
   // Status
   is_featured?: boolean;
@@ -441,60 +299,14 @@ export const SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 
 ## Step 8: Admin Layout with Auth Check
 
-```typescript
-// app/(admin)/_layout.tsx
-import { useEffect, useState } from 'react';
-import { Stack, router } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { View, ActivityIndicator } from 'react-native';
+The admin layout is implemented using Next.js route groups:
 
-export default function AdminLayout() {
-  const [checking, setChecking] = useState(true);
-  const [authenticated, setAuthenticated] = useState(false);
+- **Protected Routes**: `app/admin/(protected)/layout.tsx` - Handles authentication checks
+- **Login Page**: `app/admin/login/page.tsx` - Public login page
+- **Admin Dashboard**: `app/admin/(protected)/page.tsx` - Main dashboard
+- **Products Management**: `app/admin/(protected)/products/` - Product listing and creation
 
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
-  const checkAuth = async () => {
-    try {
-      const token = await AsyncStorage.getItem('admin_token');
-      if (token) {
-        // Optionally verify token with API
-        setAuthenticated(true);
-      } else {
-        router.replace('/(admin)/login');
-      }
-    } catch {
-      router.replace('/(admin)/login');
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  if (checking) {
-    return (
-      <View className="flex-1 bg-background items-center justify-center">
-        <ActivityIndicator size="large" color="#208B84" />
-      </View>
-    );
-  }
-
-  return (
-    <Stack
-      screenOptions={{
-        headerStyle: { backgroundColor: '#0F0F0F' },
-        headerTintColor: '#fff',
-      }}
-    >
-      <Stack.Screen name="login" options={{ headerShown: false }} />
-      <Stack.Screen name="dashboard" options={{ title: 'Admin Dashboard' }} />
-      <Stack.Screen name="add-product" options={{ title: 'Add Product' }} />
-      <Stack.Screen name="products" options={{ title: 'All Products' }} />
-    </Stack>
-  );
-}
-```
+The layout uses server-side session verification and redirects unauthenticated users to the login page.
 
 ---
 
@@ -565,15 +377,16 @@ $$ LANGUAGE plpgsql;
 - [ ] Add `JWT_SECRET` to `.env`
 
 ### API Routes
-- [ ] Create `/api/admin/auth` (Step 5)
-- [ ] Create `/api/admin/products` (Step 6)
-- [ ] Create `/api/products/[id]/click` (Step 9)
+- [x] Create `/api/admin/auth` (Step 5) - ✅ Implemented
+- [x] Create `/api/admin/products` (Step 6) - ✅ Implemented
+- [x] Create `/api/admin/upload` - ✅ Implemented (for image uploads)
+- [ ] Create `/api/products/[id]/click` (Step 9) - Optional
 
-### Mobile App
-- [ ] Create admin login screen (Step 4)
-- [ ] Create admin layout with auth check (Step 8)
-- [ ] Create add product form
-- [ ] Create products list screen
+### Admin Panel (Next.js)
+- [x] Create admin login screen (Step 4) - ✅ Implemented
+- [x] Create admin layout with auth check (Step 8) - ✅ Implemented
+- [x] Create add product form - ✅ Implemented (`app/admin/(protected)/products/add/page.tsx`)
+- [x] Create products list screen - ✅ Implemented (`app/admin/(protected)/products/page.tsx`)
 
 ---
 
@@ -592,17 +405,26 @@ When adding a product via the admin panel, you'll send:
   "sale_price": 1199,
   "category": "tops",
   "subcategory": "shirts",
+  "gender": "men",
+  "colors": ["White", "Blue"],
+  "size_range": ["S", "M", "L", "XL"],
+  "fit_type": "Regular Fit",
+  "style": ["Casual", "Classic"],
+  "occasion": ["Casual", "Office"],
+  "season": ["All Season"],
   "attributes": {
-    "colors": ["White", "Blue"],
     "pattern": "Solid",
     "materials": ["Cotton"],
-    "size_range": ["S", "M", "L", "XL"]
+    "sleeve_type": "Full Sleeve",
+    "neck_type": "Collar",
+    "length": "Regular",
+    "closure_type": "Button",
+    "care_instructions": ["Machine Wash", "Do Not Bleach"]
   },
   "image_urls": [
-    "https://assets.myntassets.com/h_720,q_90,w_540/v1/assets/images/...",
-    "https://assets.myntassets.com/h_720,q_90,w_540/v1/assets/images/..."
+    "https://your-supabase-url.supabase.co/storage/v1/object/public/products/1234567890-abc123.jpg"
   ],
-  "images_are_external": true,
+  "images_are_external": false,
   "is_featured": false,
   "is_active": true
 }

@@ -52,11 +52,25 @@ export interface Product {
   sale_price?: number | null;
   category: string;
   subcategory?: string | null;
+  // High-frequency filter fields (as columns)
+  gender: 'men' | 'women' | 'unisex' | 'kids';
+  colors: string[]; // Top-level array
+  size_range: string[]; // Top-level array
+  // Medium-frequency filter fields (as columns)
+  fit_type?: string;
+  style?: string[];
+  occasion?: string[];
+  season?: string[];
+  // Attributes JSONB (category-specific fields)
   attributes: {
-    colors?: string[];
     pattern?: string;
     materials?: string[];
-    size_range?: string[];
+    sleeve_type?: string; // For tops/dresses
+    neck_type?: string; // For tops/dresses
+    length?: string; // For various categories
+    waist_type?: string; // For bottoms
+    closure_type?: string; // For various categories
+    care_instructions?: string[]; // Array of care instructions
   };
   image_urls: string[];
   embedding?: number[] | null;
@@ -68,7 +82,7 @@ export interface Product {
   images_are_external?: boolean;
   is_featured?: boolean;
   click_count?: number;
-  created_at: string;
+  created_at?: string;
   updated_at?: string;
 }
 
