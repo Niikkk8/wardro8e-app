@@ -4,7 +4,8 @@
     "userInterfaceStyle": "automatic",
     "orientation": "default",
     "web": {
-      "output": "static"
+      "output": "static",
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       [
@@ -16,11 +17,20 @@
     ],
     "name": "wardro8e",
     "slug": "wardro8e",
+    "icon": "./assets/icon.png",
     "android": {
       "package": "com.anonymous.wardro8e"
     },
     "ios": {
       "bundleIdentifier": "com.anonymous.wardro8e"
+    },
+    "extra": {
+      "router": {
+        "origin": "https://wardro8e.com"
+      },
+      "eas": {
+        "projectId": "06390806-56cb-467e-8f37-6b78a89996de"
+      }
     }
   }
 }
