@@ -18,6 +18,7 @@ import {
 } from "@expo-google-fonts/montserrat";
 import AppSplashScreen from "../components/ui/SplashScreen";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { WardrobeProvider } from "@/contexts/WardrobeContext";
 import { setupDevTools } from "@/utils/devTools";
 
 // Keep splash screen visible while loading
@@ -64,7 +65,9 @@ export default function Layout() {
 
   return (
     <AuthProvider>
-      <Slot />
+      <WardrobeProvider>
+        <Slot />
+      </WardrobeProvider>
     </AuthProvider>
   );
 }

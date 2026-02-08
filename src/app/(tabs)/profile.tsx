@@ -6,15 +6,31 @@ import {
   ActivityIndicator,
   Image,
   TouchableOpacity,
+  Alert,
+  Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { storage } from "@/lib/storage";
 import { UserProfile, UserPreferences } from "@/types";
+import { theme } from "@/styles/theme";
+import { typography } from "@/styles/typography";
+import { STATIC_PRODUCTS } from "@/data/staticProducts";
+import { Product } from "@/types";
+
+// Dynamic import for image picker (not available in Expo Go)
+let ImagePicker: typeof import("expo-image-picker") | null = null;
+try {
+  ImagePicker = require("expo-image-picker");
+} catch (e) {
+  // Image picker not available (likely in Expo Go)
+}
+
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const PRODUCT_CARD_WIDTH = (SCREEN_WIDTH - 48 - 12) / 2;
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -23,6 +39,10 @@ export default function ProfilePage() {
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
   const [loading, setLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  // Get some random products for "Recently Viewed" simulation
+  const recentlyViewedProducts = STATIC_PRODUCTS.sort((a, b) => Math.random() - 0.5).slice(0, 4);
 
   useEffect(() => {
     if (user) {
@@ -36,7 +56,6 @@ export default function ProfilePage() {
     try {
       setLoading(true);
 
-      // Fetch user profile
       const { data: profileData, error: profileError } = await supabase
         .from("users")
         .select("*")
@@ -45,7 +64,6 @@ export default function ProfilePage() {
 
       if (profileError) throw profileError;
 
-      // Fetch user preferences
       const { data: preferencesData, error: preferencesError } = await supabase
         .from("user_preferences")
         .select("*")
@@ -53,14 +71,12 @@ export default function ProfilePage() {
         .single();
 
       if (preferencesError && preferencesError.code !== "PGRST116") {
-        // PGRST116 is "not found" error, which is okay if preferences don't exist yet
         throw preferencesError;
       }
 
       setProfile(profileData);
       setPreferences(preferencesData || null);
 
-      // Sync local storage flags so the rest of the app can route quickly/offline
       const profileOnboardingCompleted =
         !!profileData?.onboarding_completed || !!preferencesData;
       const styleQuizCompleted =
@@ -86,17 +102,15 @@ export default function ProfilePage() {
   const parseDate = (dateString?: string): Date | null => {
     if (!dateString) return null;
     try {
-      // Try parsing DD/MM/YYYY format first (Indian format)
       if (dateString.includes("/")) {
         const parts = dateString.split("/");
         if (parts.length === 3) {
           const day = parseInt(parts[0], 10);
-          const month = parseInt(parts[1], 10) - 1; // Month is 0-indexed
+          const month = parseInt(parts[1], 10) - 1;
           const year = parseInt(parts[2], 10);
           return new Date(year, month, day);
         }
       }
-      // Fallback to standard Date parsing (for ISO format or other formats)
       return new Date(dateString);
     } catch {
       return null;
@@ -130,27 +144,6 @@ export default function ProfilePage() {
     return genderMap[gender] || gender;
   };
 
-  const getColorHex = (colorName: string) => {
-    const colorMap: { [key: string]: string } = {
-      black: "#000000",
-      white: "#FFFFFF",
-      red: "#EF4444",
-      blue: "#3B82F6",
-      green: "#10B981",
-      yellow: "#F59E0B",
-      purple: "#8B5CF6",
-      pink: "#EC4899",
-      orange: "#F97316",
-      brown: "#92400E",
-      gray: "#6B7280",
-      grey: "#6B7280",
-      navy: "#1E3A8A",
-      beige: "#F5F5DC",
-      tan: "#D2B48C",
-    };
-    return colorMap[colorName.toLowerCase()] || "#E5E5E5";
-  };
-
   const handleLogout = async () => {
     try {
       setLoggingOut(true);
@@ -163,11 +156,161 @@ export default function ProfilePage() {
     }
   };
 
+  const handlePickImage = async () => {
+    if (!ImagePicker) {
+      Alert.alert(
+        "Not Available",
+        "Profile picture editing requires a development build. This feature is not available in Expo Go."
+      );
+      return;
+    }
+
+    try {
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (!permissionResult.granted) {
+        Alert.alert(
+          "Permission Required",
+          "Please allow access to your photo library to change your profile picture."
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        await uploadProfileImage(result.assets[0].uri);
+      }
+    } catch (error: any) {
+      console.error("Error picking image:", error);
+      Alert.alert("Error", "Failed to pick image. Please try again.");
+    }
+  };
+
+  const uploadProfileImage = async (imageUri: string) => {
+    if (!user) return;
+
+    try {
+      setUploadingImage(true);
+
+      // For now, we'll store the local URI as the avatar_url
+      // In production, you'd upload to Supabase Storage
+      const { error } = await supabase
+        .from("users")
+        .update({ avatar_url: imageUri })
+        .eq("id", user.id);
+
+      if (error) throw error;
+
+      // Update local state
+      setProfile((prev) => (prev ? { ...prev, avatar_url: imageUri } : prev));
+    } catch (error: any) {
+      console.error("Error uploading image:", error);
+      Alert.alert("Error", "Failed to update profile picture. Please try again.");
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleProductPress = (productId: string) => {
+    router.push(`/product/${productId}`);
+  };
+
+  const renderProductCard = (product: Product) => {
+    const hasDiscount = product.sale_price && product.sale_price < product.price;
+    const displayPrice = hasDiscount ? product.sale_price : product.price;
+
+    return (
+      <TouchableOpacity
+        key={product.id}
+        onPress={() => handleProductPress(product.id)}
+        className="mb-4"
+        style={{ width: PRODUCT_CARD_WIDTH }}
+        activeOpacity={0.9}
+      >
+        <View
+          className="bg-white rounded-2xl overflow-hidden"
+          style={{
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.08,
+            shadowRadius: 8,
+            elevation: 3,
+          }}
+        >
+          <Image
+            source={{ uri: product.image_urls?.[0] }}
+            style={{
+              width: "100%",
+              height: PRODUCT_CARD_WIDTH * 1.3,
+              backgroundColor: theme.colors.neutral[100],
+            }}
+            resizeMode="cover"
+          />
+          <View className="p-3">
+            {product.source_brand_name && (
+              <Text
+                className="text-neutral-500 mb-1"
+                style={{
+                  fontFamily: typography.fontFamily.sans.medium,
+                  fontSize: 10,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                }}
+                numberOfLines={1}
+              >
+                {product.source_brand_name}
+              </Text>
+            )}
+            <Text
+              className="text-neutral-900 mb-2"
+              style={{
+                fontFamily: typography.fontFamily.sans.medium,
+                fontSize: 12,
+                lineHeight: 16,
+              }}
+              numberOfLines={2}
+            >
+              {product.title}
+            </Text>
+            <View className="flex-row items-center gap-2">
+              <Text
+                className="text-neutral-900"
+                style={{
+                  fontFamily: typography.fontFamily.sans.bold,
+                  fontSize: 14,
+                }}
+              >
+                ₹{displayPrice?.toLocaleString("en-IN")}
+              </Text>
+              {hasDiscount && (
+                <Text
+                  className="text-neutral-400 line-through"
+                  style={{
+                    fontFamily: typography.fontFamily.sans.regular,
+                    fontSize: 11,
+                  }}
+                >
+                  ₹{product.price.toLocaleString("en-IN")}
+                </Text>
+              )}
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   if (loading) {
     return (
-      <SafeAreaView className="flex-1 bg-white">
+      <SafeAreaView edges={["top"]} className="flex-1 bg-white">
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#208B84" />
+          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
         </View>
       </SafeAreaView>
     );
@@ -177,385 +320,243 @@ export default function ProfilePage() {
   const gender = formatGender(profile?.gender);
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
-      {/* Top Header with Back Icon and Title */}
+    <SafeAreaView edges={["top"]} className="flex-1 bg-white">
+      {/* Header - matching homepage style */}
       <View
-        className="flex-row items-center px-6 py-4 border-b"
-        style={{ borderBottomColor: "#E5E5E5" }}
+        className="flex-row items-center justify-between px-4 py-3 border-b"
+        style={{
+          borderBottomColor: theme.colors.neutral[200],
+          backgroundColor: "#FFFFFF",
+        }}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          className="mr-4"
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        <Text
+          style={{
+            ...typography.styles.logo,
+            color: theme.colors.primary[500],
+          }}
         >
-          <Text className="text-neutral-700 text-lg font-bold pb-2">←</Text>
-        </TouchableOpacity>
-        <Text className="text-xl font-serif-bold text-neutral-900">
-          Profile
+          Wardro8e
         </Text>
+
+        <View className="flex-row items-center gap-4">
+          <TouchableOpacity className="p-2" activeOpacity={0.7}>
+            <Ionicons
+              name="settings-outline"
+              size={24}
+              color={theme.colors.neutral[700]}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 100 }}
+        contentContainerStyle={{ paddingBottom: 20 }}
         showsVerticalScrollIndicator={false}
-        bounces={false}
       >
-        {/* Profile Header Section - Horizontal Layout */}
-        <View className="px-6 py-8">
+        {/* Profile Header Section */}
+        <View className="px-6 py-6">
           <View className="flex-row items-center gap-4">
-            {/* Avatar on Left */}
-            <View className="relative">
-              {profile?.avatar_url ? (
+            {/* Avatar with Edit */}
+            <TouchableOpacity
+              onPress={handlePickImage}
+              disabled={uploadingImage}
+              className="relative"
+              activeOpacity={0.8}
+            >
+              {uploadingImage ? (
+                <View
+                  className="bg-neutral-100 rounded-full items-center justify-center"
+                  style={{ width: 88, height: 88, borderRadius: 44 }}
+                >
+                  <ActivityIndicator size="small" color={theme.colors.primary[500]} />
+                </View>
+              ) : profile?.avatar_url ? (
                 <Image
                   source={{ uri: profile.avatar_url }}
-                  className="rounded-full"
-                  style={{ width: 100, height: 100, borderRadius: 50 }}
+                  style={{
+                    width: 88,
+                    height: 88,
+                    borderRadius: 44,
+                    backgroundColor: theme.colors.neutral[100],
+                  }}
                 />
               ) : (
                 <View
-                  className="bg-primary-500 rounded-full items-center justify-center"
-                  style={{
-                    width: 100,
-                    height: 100,
-                    borderRadius: 50,
-                    shadowColor: "#208B84",
-                    shadowOffset: { width: 0, height: 4 },
-                    shadowOpacity: 0.3,
-                    shadowRadius: 8,
-                    elevation: 8,
-                  }}
+                  className="bg-neutral-900 rounded-full items-center justify-center"
+                  style={{ width: 88, height: 88, borderRadius: 44 }}
                 >
-                  <Text className="text-white text-4xl font-serif-bold">
+                  <Text
+                    className="text-white"
+                    style={{
+                      fontFamily: typography.fontFamily.serif.bold,
+                      fontSize: 32,
+                    }}
+                  >
                     {getInitials(profile?.full_name)}
                   </Text>
                 </View>
               )}
-              {/* Edit button overlay */}
-              <TouchableOpacity
-                className="absolute bottom-0 right-0 bg-white rounded-full items-center justify-center border-2 border-primary-500"
+              {/* Edit overlay */}
+              <View
+                className="absolute bottom-0 right-0 bg-white rounded-full items-center justify-center"
                 style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                  shadowColor: "#000",
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.1,
-                  shadowRadius: 4,
-                  elevation: 4,
+                  width: 28,
+                  height: 28,
+                  borderRadius: 14,
+                  borderWidth: 2,
+                  borderColor: theme.colors.neutral[900],
                 }}
               >
-                <Ionicons name="camera" size={14} color="#208B84" />
-              </TouchableOpacity>
-            </View>
+                <Ionicons name="camera" size={14} color={theme.colors.neutral[900]} />
+              </View>
+            </TouchableOpacity>
 
-            {/* Name and Details on Right */}
+            {/* Name and Details */}
             <View className="flex-1">
-              {/* Name */}
-              <Text className="text-2xl font-serif-bold text-neutral-900 mb-2">
+              <Text
+                className="text-neutral-900 mb-1"
+                style={{
+                  fontFamily: typography.fontFamily.serif.bold,
+                  fontSize: 22,
+                  lineHeight: 28,
+                }}
+              >
                 {profile?.full_name || "User"}
               </Text>
 
-              {/* Subtitle with key info */}
-              <View className="gap-2">
-                <View className="flex-row items-center gap-2">
-                  <Ionicons name="mail-outline" size={14} color="#737373" />
-                  <Text className="text-sm text-neutral-500" numberOfLines={1}>
-                    {profile?.email}
-                  </Text>
-                </View>
-              </View>
+              <Text
+                className="text-neutral-500"
+                style={{
+                  fontFamily: typography.fontFamily.sans.regular,
+                  fontSize: 13,
+                }}
+                numberOfLines={1}
+              >
+                {profile?.email}
+              </Text>
             </View>
           </View>
         </View>
 
-        {/* Content Sections */}
-        <View className="px-6 pt-6">
-          {/* Personal Details Card */}
-          <View
-            className="bg-white rounded-2xl p-6 mb-6"
-            style={{
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.08,
-              shadowRadius: 8,
-              elevation: 4,
-            }}
-          >
-            <View className="flex-row items-center gap-2 mb-4">
-              <Ionicons
-                name="person-circle-outline"
-                size={20}
-                color="#208B84"
-              />
-              <Text className="text-lg font-serif-bold text-neutral-900">
-                Personal Details
-              </Text>
-            </View>
-
-            <View className="gap-4">
-              {/* Birthday */}
-              {formattedDate && (
-                <View
-                  className="flex-row items-center justify-between py-3"
-                  style={{ borderBottomWidth: 1, borderBottomColor: "#F5F5F5" }}
+        {/* Quick Info Pills */}
+        <View className="px-6 mb-6">
+          <View className="flex-row flex-wrap gap-2">
+            {gender && (
+              <View className="flex-row items-center gap-1.5 px-3 py-2 bg-neutral-100 rounded-full">
+                <Ionicons name="person-outline" size={14} color={theme.colors.neutral[600]} />
+                <Text
+                  className="text-neutral-700"
+                  style={{
+                    fontFamily: typography.fontFamily.sans.medium,
+                    fontSize: 12,
+                  }}
                 >
-                  <View className="flex-row items-center gap-3">
-                    <Ionicons
-                      name="calendar-outline"
-                      size={18}
-                      color="#737373"
-                    />
-                    <Text className="text-sm text-neutral-700 font-sans-medium">
-                      Birthday
-                    </Text>
-                  </View>
-                  <Text className="text-sm text-neutral-900">
-                    {formattedDate}
-                  </Text>
-                </View>
-              )}
-
-              {/* Gender */}
-              {gender && (
-                <View
-                  className="flex-row items-center justify-between py-3"
-                  style={{ borderBottomWidth: 1, borderBottomColor: "#F5F5F5" }}
-                >
-                  <View className="flex-row items-center gap-3">
-                    <Ionicons name="person-outline" size={18} color="#737373" />
-                    <Text className="text-sm text-neutral-700 font-sans-medium">
-                      Gender
-                    </Text>
-                  </View>
-                  <Text className="text-sm text-neutral-900">{gender}</Text>
-                </View>
-              )}
-
-              {/* Phone */}
-              {profile?.phone && (
-                <View className="flex-row items-center justify-between py-3">
-                  <View className="flex-row items-center gap-3">
-                    <Ionicons name="call-outline" size={18} color="#737373" />
-                    <Text className="text-sm text-neutral-700 font-sans-medium">
-                      Phone
-                    </Text>
-                  </View>
-                  <Text className="text-sm text-neutral-900">
-                    {profile.phone}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </View>
-
-          {/* Style Preferences Card */}
-          {preferences && (
-            <View
-              className="bg-white rounded-2xl p-6 mb-6"
-              style={{
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.08,
-                shadowRadius: 8,
-                elevation: 4,
-              }}
-            >
-              <View className="flex-row items-center gap-2 mb-6">
-                <Text className="text-lg font-serif-bold text-neutral-900">
-                  Style Preferences
+                  {gender}
                 </Text>
               </View>
+            )}
+            {formattedDate && (
+              <View className="flex-row items-center gap-1.5 px-3 py-2 bg-neutral-100 rounded-full">
+                <Ionicons name="calendar-outline" size={14} color={theme.colors.neutral[600]} />
+                <Text
+                  className="text-neutral-700"
+                  style={{
+                    fontFamily: typography.fontFamily.sans.medium,
+                    fontSize: 12,
+                  }}
+                >
+                  {formattedDate}
+                </Text>
+              </View>
+            )}
+            {profile?.phone && (
+              <View className="flex-row items-center gap-1.5 px-3 py-2 bg-neutral-100 rounded-full">
+                <Ionicons name="call-outline" size={14} color={theme.colors.neutral[600]} />
+                <Text
+                  className="text-neutral-700"
+                  style={{
+                    fontFamily: typography.fontFamily.sans.medium,
+                    fontSize: 12,
+                  }}
+                >
+                  {profile.phone}
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
 
-              {/* Style Tags */}
-              {preferences.style_tags && preferences.style_tags.length > 0 && (
-                <View className="mb-6">
-                  <View className="flex-row items-center gap-2 mb-3">
-                    <Text className="text-sm text-neutral-700 font-sans-semibold">
-                      Style Tags
-                    </Text>
-                  </View>
-                  <View className="flex-row flex-wrap gap-2.5">
-                    {preferences.style_tags.map((tag, index) => (
-                      <View
-                        key={index}
-                        className="py-3 px-5 rounded-full border-2 border-primary-500 bg-primary-50 items-center justify-center"
-                        style={{
-                          shadowColor: "#208B84",
-                          shadowOffset: { width: 0, height: 2 },
-                          shadowOpacity: 0.15,
-                          shadowRadius: 4,
-                          elevation: 3,
-                        }}
-                      >
-                        <Text className="text-sm text-primary-500 font-sans-semibold">
-                          {tag.charAt(0).toUpperCase() + tag.slice(1)}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              )}
-
-              {/* Favorite Colors */}
-              {preferences.favorite_colors &&
-                preferences.favorite_colors.length > 0 && (
-                  <View className="mb-6">
-                    <View className="flex-row items-center gap-2 mb-4">
-                      <Text className="text-sm text-neutral-700 font-sans-semibold">
-                        Favorite Colors
-                      </Text>
-                    </View>
-                    <View className="flex-row flex-wrap gap-4 items-center">
-                      {preferences.favorite_colors.map((color, index) => (
-                        <View key={index} className="items-center gap-2.5">
-                          <View
-                            className="rounded-full border-2 border-neutral-300"
-                            style={{
-                              width: 56,
-                              height: 56,
-                              borderRadius: 28,
-                              backgroundColor: getColorHex(color),
-                              shadowColor: "#000",
-                              shadowOffset: { width: 0, height: 3 },
-                              shadowOpacity: 0.15,
-                              shadowRadius: 5,
-                              elevation: 4,
-                            }}
-                          />
-                          <Text className="text-xs text-neutral-700 font-sans-medium">
-                            {color.charAt(0).toUpperCase() + color.slice(1)}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-              {/* Pattern Preferences */}
-              {preferences.pattern_preferences &&
-                preferences.pattern_preferences.length > 0 && (
-                  <View>
-                    <View className="flex-row items-center gap-2 mb-3">
-                      <Text className="text-sm text-neutral-700 font-sans-semibold">
-                        Pattern Preferences
-                      </Text>
-                    </View>
-                    <View className="flex-row flex-wrap gap-2.5">
-                      {preferences.pattern_preferences.map((pattern, index) => (
-                        <View
-                          key={index}
-                          className="py-3 px-5 rounded-full border-2 border-primary-500 bg-primary-50 items-center justify-center"
-                          style={{
-                            shadowColor: "#208B84",
-                            shadowOffset: { width: 0, height: 2 },
-                            shadowOpacity: 0.15,
-                            shadowRadius: 4,
-                            elevation: 3,
-                          }}
-                        >
-                          <Text className="text-sm text-primary-500 font-sans-semibold">
-                            {pattern.charAt(0).toUpperCase() + pattern.slice(1)}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                )}
+        {/* Style Preferences Link */}
+        <View className="px-6 mb-6">
+          <TouchableOpacity
+            onPress={() => router.push("/profile/style-preferences")}
+            className="flex-row items-center justify-between py-4 px-5 bg-neutral-50 rounded-2xl border border-neutral-200"
+            activeOpacity={0.7}
+          >
+            <View className="flex-row items-center gap-3">
+              <View>
+                <Text
+                  className="text-neutral-900"
+                  style={{
+                    fontFamily: typography.fontFamily.sans.semibold,
+                    fontSize: 15,
+                  }}
+                >
+                  Style Preferences
+                </Text>
+                <Text
+                  className="text-neutral-500"
+                  style={{
+                    fontFamily: typography.fontFamily.sans.regular,
+                    fontSize: 12,
+                  }}
+                >
+                  {preferences ? "View your style profile" : "Complete your style quiz"}
+                </Text>
+              </View>
             </View>
-          )}
+            <Ionicons name="chevron-forward" size={20} color={theme.colors.neutral[400]} />
+          </TouchableOpacity>
+        </View>
 
-          {/* Account Status Card */}
-          <View
-            className="bg-white rounded-2xl p-6 mb-6"
+        {/* Recently Viewed Products */}
+        <View className="px-6 mb-8">
+          <Text
+            className="text-neutral-900 mb-4"
             style={{
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.08,
-              shadowRadius: 8,
-              elevation: 4,
+              fontFamily: typography.fontFamily.serif.medium,
+              fontSize: 18,
             }}
           >
-            <View className="flex-row items-center gap-2 mb-4">
-              <Ionicons
-                name="checkmark-circle-outline"
-                size={20}
-                color="#208B84"
-              />
-              <Text className="text-lg font-serif-bold text-neutral-900">
-                Account Status
-              </Text>
-            </View>
+            Recently Viewed
+          </Text>
 
-            <View className="gap-3">
-              <View
-                className="flex-row items-center justify-between py-3"
-                style={{ borderBottomWidth: 1, borderBottomColor: "#F5F5F5" }}
-              >
-                <View className="flex-row items-center gap-3">
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={18}
-                    color={
-                      profile?.onboarding_completed ? "#208B84" : "#D4D4D4"
-                    }
-                  />
-                  <Text className="text-sm text-neutral-700 font-sans-medium">
-                    Onboarding Completed
-                  </Text>
-                </View>
-                <View
-                  className={`w-5 h-5 rounded-full ${
-                    profile?.onboarding_completed
-                      ? "bg-primary-500"
-                      : "bg-neutral-300"
-                  }`}
-                />
-              </View>
-
-              <View className="flex-row items-center justify-between py-3">
-                <View className="flex-row items-center gap-3">
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={18}
-                    color={
-                      profile?.style_quiz_completed ? "#208B84" : "#D4D4D4"
-                    }
-                  />
-                  <Text className="text-sm text-neutral-700 font-sans-medium">
-                    Style Quiz Completed
-                  </Text>
-                </View>
-                <View
-                  className={`w-5 h-5 rounded-full ${
-                    profile?.style_quiz_completed
-                      ? "bg-primary-500"
-                      : "bg-neutral-300"
-                  }`}
-                />
-              </View>
-            </View>
+          <View className="flex-row flex-wrap justify-between">
+            {recentlyViewedProducts.map((product) => renderProductCard(product))}
           </View>
+        </View>
 
-          {/* Logout Button */}
+        {/* Logout Button */}
+        <View className="px-6">
           <TouchableOpacity
             onPress={handleLogout}
             disabled={loggingOut}
-            className="bg-red-50 border-2 border-red-200 rounded-2xl p-4 mb-6 flex-row items-center justify-center gap-3"
-            style={{
-              shadowColor: "#EF4444",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.1,
-              shadowRadius: 4,
-              elevation: 3,
-            }}
+            className="flex-row items-center justify-center gap-2 py-4 border border-neutral-300 rounded-xl"
+            activeOpacity={0.7}
           >
             {loggingOut ? (
-              <ActivityIndicator size="small" color="#EF4444" />
+              <ActivityIndicator size="small" color={theme.colors.neutral[900]} />
             ) : (
               <>
-                <Ionicons name="log-out-outline" size={20} color="#EF4444" />
-                <Text className="text-red-600 font-sans-semibold text-base">
-                  Logout
+                <Ionicons name="log-out-outline" size={20} color={theme.colors.neutral[900]} />
+                <Text
+                  className="text-neutral-900"
+                  style={{
+                    fontFamily: typography.fontFamily.sans.medium,
+                    fontSize: 15,
+                  }}
+                >
+                  Sign Out
                 </Text>
               </>
             )}

@@ -9,6 +9,9 @@ import {
   ActivityIndicator,
   Linking,
   Animated,
+  Modal,
+  TextInput,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,17 +21,22 @@ import { typography } from "../../styles/typography";
 import { Product } from "../../types";
 import { STATIC_PRODUCTS } from "../../data/staticProducts";
 import MasonryLayout from "../../components/layouts/MasonryLayout";
+import { useWardrobe } from "../../contexts/WardrobeContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 export default function ProductDetailPage() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const wardrobe = useWardrobe();
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [isLiked, setIsLiked] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [newCollectionName, setNewCollectionName] = useState("");
+
+  const isLiked = id ? wardrobe.isFavourited(id) : false;
 
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -235,7 +243,7 @@ export default function ProductDetailPage() {
             {/* Action Buttons on Image */}
             <View className="absolute top-4 right-4 gap-3">
               <TouchableOpacity
-                onPress={() => setIsLiked(!isLiked)}
+                onPress={() => id && wardrobe.toggleFavourite(id)}
                 className="w-10 h-10 rounded-full items-center justify-center"
                 style={{
                   backgroundColor: "rgba(255, 255, 255, 0.92)",
@@ -250,6 +258,7 @@ export default function ProductDetailPage() {
                 />
               </TouchableOpacity>
               <TouchableOpacity
+                onPress={() => setShowSaveModal(true)}
                 className="w-10 h-10 rounded-full items-center justify-center"
                 style={{
                   backgroundColor: "rgba(255, 255, 255, 0.92)",
@@ -258,7 +267,7 @@ export default function ProductDetailPage() {
                 activeOpacity={0.8}
               >
                 <Ionicons
-                  name="arrow-redo-outline"
+                  name="bookmark-outline"
                   size={18}
                   color={theme.colors.neutral[600]}
                 />
@@ -499,7 +508,7 @@ export default function ProductDetailPage() {
                   {colors.length > 0 && (
                     <View>
                       <Text
-                        className="text-neutral-500 mb-1"
+                        className="text-neutral-900 mb-1 font-medium"
                         style={{
                           fontFamily: typography.fontFamily.sans.medium,
                           fontSize: 12,
@@ -522,7 +531,7 @@ export default function ProductDetailPage() {
                     product.attributes.materials.length > 0 && (
                       <View>
                         <Text
-                          className="text-neutral-500 mb-1"
+                          className="text-neutral-900 mb-1 font-medium"
                           style={{
                             fontFamily: typography.fontFamily.sans.medium,
                             fontSize: 12,
@@ -544,7 +553,7 @@ export default function ProductDetailPage() {
                   {product.style && product.style.length > 0 && (
                     <View>
                       <Text
-                        className="text-neutral-500 mb-1"
+                        className="text-neutral-900 mb-1 font-medium"
                         style={{
                           fontFamily: typography.fontFamily.sans.medium,
                           fontSize: 12,
@@ -566,7 +575,7 @@ export default function ProductDetailPage() {
                   {product.occasion && product.occasion.length > 0 && (
                     <View>
                       <Text
-                        className="text-neutral-500 mb-1"
+                        className="text-neutral-900 mb-1 font-medium"
                         style={{
                           fontFamily: typography.fontFamily.sans.medium,
                           fontSize: 12,
@@ -657,6 +666,193 @@ export default function ProductDetailPage() {
           </TouchableOpacity>
         </View>
       )}
+      {/* Save to Collection Modal */}
+      <Modal
+        visible={showSaveModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowSaveModal(false)}
+      >
+        <View className="flex-1" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
+          <TouchableOpacity
+            className="flex-1"
+            onPress={() => setShowSaveModal(false)}
+            activeOpacity={1}
+          />
+          <View
+            className="bg-white rounded-t-3xl"
+            style={{ maxHeight: "65%" }}
+          >
+            {/* Modal Header */}
+            <View
+              className="flex-row items-center justify-between px-5 py-4 border-b"
+              style={{ borderBottomColor: theme.colors.neutral[200] }}
+            >
+              <Text
+                style={{
+                  fontFamily: typography.fontFamily.serif.medium,
+                  fontSize: 18,
+                  color: theme.colors.neutral[900],
+                }}
+              >
+                Save to Collection
+              </Text>
+              <TouchableOpacity onPress={() => setShowSaveModal(false)}>
+                <Ionicons
+                  name="close"
+                  size={24}
+                  color={theme.colors.neutral[600]}
+                />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              contentContainerStyle={{
+                padding: 20,
+                paddingBottom: Platform.OS === "ios" ? 40 : 20,
+              }}
+            >
+              {/* Create New Collection */}
+              <View className="mb-5">
+                <Text
+                  className="mb-2"
+                  style={{
+                    fontFamily: typography.fontFamily.sans.semibold,
+                    fontSize: 13,
+                    color: theme.colors.neutral[700],
+                  }}
+                >
+                  New collection
+                </Text>
+                <View className="flex-row items-center gap-3">
+                  <TextInput
+                    value={newCollectionName}
+                    onChangeText={setNewCollectionName}
+                    placeholder="Collection name"
+                    placeholderTextColor={theme.colors.neutral[400]}
+                    className="flex-1 rounded-xl px-4"
+                    style={{
+                      height: 44,
+                      backgroundColor: theme.colors.neutral[100],
+                      fontFamily: typography.fontFamily.sans.regular,
+                      fontSize: 14,
+                      color: theme.colors.neutral[900],
+                    }}
+                  />
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (newCollectionName.trim() && id) {
+                        const col = wardrobe.createCollection(
+                          newCollectionName.trim()
+                        );
+                        wardrobe.addToCollection(col.id, id);
+                        setNewCollectionName("");
+                        setShowSaveModal(false);
+                      }
+                    }}
+                    className="rounded-xl items-center justify-center"
+                    style={{
+                      height: 44,
+                      paddingHorizontal: 16,
+                      backgroundColor: newCollectionName.trim()
+                        ? theme.colors.primary[500]
+                        : theme.colors.neutral[200],
+                    }}
+                    disabled={!newCollectionName.trim()}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: typography.fontFamily.sans.semibold,
+                        fontSize: 13,
+                        color: newCollectionName.trim()
+                          ? "#FFF"
+                          : theme.colors.neutral[400],
+                      }}
+                    >
+                      Create
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Existing Collections */}
+              {wardrobe.userCollections.length > 0 && (
+                <View>
+                  <Text
+                    className="mb-3"
+                    style={{
+                      fontFamily: typography.fontFamily.sans.semibold,
+                      fontSize: 13,
+                      color: theme.colors.neutral[700],
+                    }}
+                  >
+                    Your collections
+                  </Text>
+                  {wardrobe.userCollections.map((col) => {
+                    const isIn = id ? wardrobe.isInCollection(col.id, id) : false;
+                    return (
+                      <TouchableOpacity
+                        key={col.id}
+                        onPress={() => {
+                          if (id) {
+                            if (isIn) {
+                              wardrobe.removeFromCollection(col.id, id);
+                            } else {
+                              wardrobe.addToCollection(col.id, id);
+                            }
+                          }
+                        }}
+                        className="flex-row items-center justify-between py-3.5 border-b"
+                        style={{
+                          borderBottomColor: theme.colors.neutral[100],
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <View className="flex-1 mr-3">
+                          <Text
+                            numberOfLines={1}
+                            style={{
+                              fontFamily: typography.fontFamily.sans.medium,
+                              fontSize: 15,
+                              color: theme.colors.neutral[900],
+                            }}
+                          >
+                            {col.name}
+                          </Text>
+                          <Text
+                            style={{
+                              fontFamily: typography.fontFamily.sans.regular,
+                              fontSize: 12,
+                              color: theme.colors.neutral[500],
+                            }}
+                          >
+                            {col.productIds.length} item
+                            {col.productIds.length !== 1 ? "s" : ""}
+                          </Text>
+                        </View>
+                        <View
+                          className="w-6 h-6 rounded-md items-center justify-center"
+                          style={{
+                            backgroundColor: isIn
+                              ? theme.colors.primary[500]
+                              : "transparent",
+                            borderWidth: isIn ? 0 : 1.5,
+                            borderColor: theme.colors.neutral[300],
+                          }}
+                        >
+                          {isIn && (
+                            <Ionicons name="checkmark" size={16} color="#FFF" />
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
