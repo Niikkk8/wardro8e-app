@@ -30,7 +30,9 @@
       },
       "eas": {
         "projectId": "06390806-56cb-467e-8f37-6b78a89996de"
-      }
+      },
+      "supabaseUrl": "https://onhrqtlceckhqajarkcn.supabase.co",
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uaHJxdGxjZWNraHFhamFya2NuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU5Mzc0ODcsImV4cCI6MjA3MTUxMzQ4N30.OF1QhR3J2jYTnSV5yCgcaUkZ3y_3w_ydI_-vKPgxbnI"
     }
   }
 }

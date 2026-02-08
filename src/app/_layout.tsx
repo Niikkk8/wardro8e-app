@@ -17,6 +17,7 @@ import {
   Montserrat_700Bold,
 } from "@expo-google-fonts/montserrat";
 import AppSplashScreen from "../components/ui/SplashScreen";
+import { ErrorBoundary } from "../components/ui/ErrorBoundary";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { WardrobeProvider } from "@/contexts/WardrobeContext";
 import { setupDevTools } from "@/utils/devTools";
@@ -64,10 +65,12 @@ export default function Layout() {
   }
 
   return (
-    <AuthProvider>
-      <WardrobeProvider>
-        <Slot />
-      </WardrobeProvider>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <WardrobeProvider>
+          <Slot />
+        </WardrobeProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
