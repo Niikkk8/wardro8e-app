@@ -1,6 +1,7 @@
 import "../global.css";
 import { Slot } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { AppState, AppStateStatus } from "react-native";
 import * as SplashScreen from "expo-splash-screen";
 import { useFonts } from "expo-font";
 import {
@@ -18,23 +19,43 @@ import {
 } from "@expo-google-fonts/montserrat";
 import AppSplashScreen from "../components/ui/SplashScreen";
 import { ErrorBoundary } from "../components/ui/ErrorBoundary";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { WardrobeProvider } from "@/contexts/WardrobeContext";
 import { setupDevTools } from "@/utils/devTools";
+import { preferenceService } from "@/lib/preferenceService";
 
-// Keep splash screen visible while loading
 SplashScreen.preventAutoHideAsync();
+
+function PreferenceSyncManager({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const appState = useRef<AppStateStatus>(AppState.currentState);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      // Sync preferences when app goes to background
+      if (
+        appState.current === "active" &&
+        nextState.match(/inactive|background/) &&
+        user?.id
+      ) {
+        preferenceService.syncToSupabase(user.id).catch(() => {});
+      }
+      appState.current = nextState;
+    });
+
+    return () => subscription.remove();
+  }, [user?.id]);
+
+  return <>{children}</>;
+}
 
 export default function Layout() {
   const [isReady, setIsReady] = useState(false);
   
   const [fontsLoaded] = useFonts({
-    // Playfair Display (Serif)
     "PlayfairDisplay-Regular": PlayfairDisplay_400Regular,
     "PlayfairDisplay-Medium": PlayfairDisplay_500Medium,
     "PlayfairDisplay-Bold": PlayfairDisplay_700Bold,
-    
-    // Montserrat (Sans)
     "Montserrat-Thin": Montserrat_100Thin,
     "Montserrat-Light": Montserrat_300Light,
     "Montserrat-Regular": Montserrat_400Regular,
@@ -45,12 +66,8 @@ export default function Layout() {
 
   useEffect(() => {
     async function prepare() {
-      // Wait for fonts to load
       if (fontsLoaded) {
-        // Setup dev tools (only in development)
         setupDevTools();
-        
-        // Show splash for 1 second, then hide
         await new Promise(resolve => setTimeout(resolve, 1000));
         await SplashScreen.hideAsync();
         setIsReady(true);
@@ -68,7 +85,9 @@ export default function Layout() {
     <ErrorBoundary>
       <AuthProvider>
         <WardrobeProvider>
-          <Slot />
+          <PreferenceSyncManager>
+            <Slot />
+          </PreferenceSyncManager>
         </WardrobeProvider>
       </AuthProvider>
     </ErrorBoundary>

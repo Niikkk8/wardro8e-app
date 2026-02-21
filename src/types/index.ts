@@ -15,6 +15,7 @@ export interface UserProfile {
 export interface UserPreferences {
   id: string;
   user_id: string;
+  gender?: 'men' | 'women' | 'both' | null;
   style_tags: string[];
   favorite_colors: string[];
   pattern_preferences: string[];
@@ -27,6 +28,7 @@ export interface UserPreferences {
     min: number;
     max: number;
   };
+  quiz_skipped?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -52,25 +54,22 @@ export interface Product {
   sale_price?: number | null;
   category: string;
   subcategory?: string | null;
-  // High-frequency filter fields (as columns)
   gender: 'men' | 'women' | 'unisex' | 'kids';
-  colors: string[]; // Top-level array
-  size_range: string[]; // Top-level array
-  // Medium-frequency filter fields (as columns)
+  colors: string[];
+  size_range: string[];
   fit_type?: string;
   style?: string[];
   occasion?: string[];
   season?: string[];
-  // Attributes JSONB (category-specific fields)
   attributes: {
     pattern?: string;
     materials?: string[];
-    sleeve_type?: string; // For tops/dresses
-    neck_type?: string; // For tops/dresses
-    length?: string; // For various categories
-    waist_type?: string; // For bottoms
-    closure_type?: string; // For various categories
-    care_instructions?: string[]; // Array of care instructions
+    sleeve_type?: string;
+    neck_type?: string;
+    length?: string;
+    waist_type?: string;
+    closure_type?: string;
+    care_instructions?: string[];
   };
   image_urls: string[];
   embedding?: number[] | null;
@@ -85,4 +84,36 @@ export interface Product {
   created_at?: string;
   updated_at?: string;
 }
+
+export type InteractionType = 'view' | 'like' | 'save' | 'purchase' | 'dismiss';
+
+export type FeedType = 'cold_start' | 'preference' | 'behavioral';
+
+export interface StyleCounter {
+  style_scores: Record<string, number>;
+  color_scores: Record<string, number>;
+  pattern_scores: Record<string, number>;
+  last_synced_at: string;
+}
+
+export interface FeedCache {
+  data: Product[];
+  cached_at: string;
+  feed_type: FeedType;
+}
+
+export interface FeedOptions {
+  limit?: number;
+  offset?: number;
+  excludeIds?: string[];
+  gender?: string | null;
+}
+
+export const INTERACTION_WEIGHTS: Record<InteractionType, number> = {
+  purchase: 1.0,
+  save: 0.7,
+  like: 0.5,
+  view: 0.2,
+  dismiss: -0.3,
+};
 

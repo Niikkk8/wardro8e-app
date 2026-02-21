@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -22,12 +22,18 @@ import { Product } from "../../types";
 import { STATIC_PRODUCTS } from "../../data/staticProducts";
 import MasonryLayout from "../../components/layouts/MasonryLayout";
 import { useWardrobe } from "../../contexts/WardrobeContext";
+import { useAuth } from "../../contexts/AuthContext";
+import { interactionService } from "../../lib/interactionService";
+import { preferenceService } from "../../lib/preferenceService";
+import { recommendationService } from "../../lib/recommendationService";
+import { clientStorage } from "../../lib/clientStorage";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 export default function ProductDetailPage() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const wardrobe = useWardrobe();
+  const { user } = useAuth();
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
@@ -35,8 +41,14 @@ export default function ProductDetailPage() {
   const [showDetails, setShowDetails] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
+  const [similarProducts, setSimilarProducts] = useState<Product[]>([]);
+  const [loadingSimilar, setLoadingSimilar] = useState(true);
 
   const isLiked = id ? wardrobe.isFavourited(id) : false;
+  const userId = user?.id || null;
+  const openTime = useRef<number>(Date.now());
+  const viewLogged = useRef(false);
+  const scrollDepthReached = useRef(false);
 
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -46,7 +58,11 @@ export default function ProductDetailPage() {
 
   useEffect(() => {
     if (id) {
+      openTime.current = Date.now();
+      viewLogged.current = false;
+      scrollDepthReached.current = false;
       fetchProduct();
+      logViewAndFetchSimilar();
     }
   }, [id]);
 
@@ -54,7 +70,6 @@ export default function ProductDetailPage() {
     setImageError(false);
   }, [currentImageIndex]);
 
-  // Entrance animation
   useEffect(() => {
     if (product) {
       Animated.parallel([
@@ -73,7 +88,6 @@ export default function ProductDetailPage() {
     }
   }, [product]);
 
-  // Details expansion animation
   useEffect(() => {
     Animated.parallel([
       Animated.spring(detailsHeight, {
@@ -93,9 +107,21 @@ export default function ProductDetailPage() {
   const fetchProduct = async () => {
     try {
       setLoading(true);
+
+      // Check local cache first
+      if (id) {
+        const cached = await clientStorage.getCachedProduct(id);
+        if (cached) {
+          setProduct(cached);
+          setLoading(false);
+          return;
+        }
+      }
+
       const foundProduct = STATIC_PRODUCTS.find((p) => p.id === id);
       if (foundProduct) {
         setProduct(foundProduct);
+        await clientStorage.setCachedProduct(foundProduct);
       }
     } catch (error) {
       console.error("Error fetching product:", error);
@@ -104,9 +130,84 @@ export default function ProductDetailPage() {
     }
   };
 
+  const logViewAndFetchSimilar = async () => {
+    if (!id) return;
+
+    // A: Log view interaction (fire-and-forget)
+    if (userId && !viewLogged.current) {
+      viewLogged.current = true;
+      const logged = await interactionService.logInteraction(userId, id, 'view');
+      if (logged) {
+        const prod = STATIC_PRODUCTS.find((p) => p.id === id);
+        if (prod) {
+          preferenceService.handleInteraction(userId, prod, 'view').catch(() => {});
+        }
+      }
+    }
+
+    // C: Fetch similar products
+    setLoadingSimilar(true);
+    try {
+      const prod = STATIC_PRODUCTS.find((p) => p.id === id);
+      if (prod) {
+        const seenIds = userId ? await clientStorage.getSeenProductIds(userId) : [];
+        const similar = await recommendationService.getSimilarProducts(prod, 12, seenIds);
+        setSimilarProducts(similar);
+      }
+    } catch (e) {
+      console.error("Error fetching similar products:", e);
+    } finally {
+      setLoadingSimilar(false);
+    }
+  };
+
+  const handleScrollDepth = useCallback((event: any) => {
+    if (scrollDepthReached.current || !product || !userId) return;
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const scrollPercent = (contentOffset.y + layoutMeasurement.height) / contentSize.height;
+    const timeOnScreen = Date.now() - openTime.current;
+
+    if (scrollPercent > 0.5 && timeOnScreen > 3000) {
+      scrollDepthReached.current = true;
+      // Update implicit style counters (stronger signal than just view)
+      preferenceService.updateStyleCounters(userId, product, 'view').catch(() => {});
+    }
+  }, [product, userId]);
+
+  const handleLike = useCallback(() => {
+    if (!id) return;
+    wardrobe.toggleFavourite(id);
+
+    if (userId && product && !isLiked) {
+      interactionService.logInteraction(userId, id, 'like').catch(() => {});
+      preferenceService.handleInteraction(userId, product, 'like').catch(() => {});
+    }
+  }, [id, userId, product, isLiked, wardrobe]);
+
+  const handleSave = useCallback((collectionId: string) => {
+    if (!id) return;
+
+    const isIn = wardrobe.isInCollection(collectionId, id);
+    if (isIn) {
+      wardrobe.removeFromCollection(collectionId, id);
+    } else {
+      wardrobe.addToCollection(collectionId, id);
+      if (userId && product) {
+        interactionService.logInteraction(userId, id, 'save').catch(() => {});
+        preferenceService.handleInteraction(userId, product, 'save').catch(() => {});
+      }
+    }
+  }, [id, userId, product, wardrobe]);
+
   const handleBuyNow = async () => {
     if (!product?.affiliate_url) return;
     try {
+      // Log purchase intent
+      if (userId && id) {
+        interactionService.logInteraction(userId, id, 'purchase').catch(() => {});
+        preferenceService.handleInteraction(userId, product, 'purchase').catch(() => {});
+      }
+
       const supported = await Linking.canOpenURL(product.affiliate_url);
       if (supported) {
         await Linking.openURL(product.affiliate_url);
@@ -119,6 +220,8 @@ export default function ProductDetailPage() {
   const handleProductPress = (productId: string) => {
     router.replace(`/product/${productId}`);
     setCurrentImageIndex(0);
+    setSimilarProducts([]);
+    setLoadingSimilar(true);
   };
 
   if (loading) {
@@ -168,10 +271,12 @@ export default function ProductDetailPage() {
     : 0;
 
   const hasDetails =
-    (colors.length > 0) ||
+    colors.length > 0 ||
     (product.attributes?.materials && product.attributes.materials.length > 0) ||
     (product.style && product.style.length > 0) ||
     (product.occasion && product.occasion.length > 0);
+
+  const showMoreLikeThis = !loadingSimilar && similarProducts.length >= 3;
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-white">
@@ -227,6 +332,8 @@ export default function ProductDetailPage() {
         showsVerticalScrollIndicator={false}
         className="flex-1"
         contentContainerStyle={{ paddingBottom: 100 }}
+        onScroll={handleScrollDepth}
+        scrollEventThrottle={500}
       >
         {/* Product Image */}
         {currentImage && !imageError ? (
@@ -240,10 +347,9 @@ export default function ProductDetailPage() {
               onError={() => setImageError(true)}
             />
 
-            {/* Action Buttons on Image */}
             <View className="absolute top-4 right-4 gap-3">
               <TouchableOpacity
-                onPress={() => id && wardrobe.toggleFavourite(id)}
+                onPress={handleLike}
                 className="w-10 h-10 rounded-full items-center justify-center"
                 style={{
                   backgroundColor: "rgba(255, 255, 255, 0.92)",
@@ -274,7 +380,6 @@ export default function ProductDetailPage() {
               </TouchableOpacity>
             </View>
 
-            {/* Discount Badge */}
             {hasDiscount && (
               <View
                 className="absolute top-4 left-4 px-3 py-1.5 rounded-full"
@@ -292,7 +397,6 @@ export default function ProductDetailPage() {
               </View>
             )}
 
-            {/* Image Dots */}
             {images.length > 1 && (
               <View className="absolute bottom-4 left-0 right-0 flex-row justify-center gap-1.5">
                 {images.map((_, index) => (
@@ -312,7 +416,6 @@ export default function ProductDetailPage() {
               </View>
             )}
 
-            {/* Tap Navigation */}
             {images.length > 1 && (
               <>
                 <TouchableOpacity
@@ -355,7 +458,6 @@ export default function ProductDetailPage() {
             transform: [{ translateY: slideAnim }],
           }}
         >
-          {/* Brand */}
           {product.source_brand_name && (
             <Text
               className="text-primary-500 mb-1"
@@ -370,7 +472,6 @@ export default function ProductDetailPage() {
             </Text>
           )}
 
-          {/* Title */}
           <Text
             className="text-neutral-900 mb-3"
             style={{
@@ -382,7 +483,6 @@ export default function ProductDetailPage() {
             {product.title}
           </Text>
 
-          {/* Price */}
           <View className="flex-row items-center gap-3 mb-5">
             <Text
               className="text-neutral-900"
@@ -406,7 +506,6 @@ export default function ProductDetailPage() {
             )}
           </View>
 
-          {/* Quick Info */}
           <View className="flex-row flex-wrap gap-2 mb-5">
             {sizeRange.length > 0 && (
               <View
@@ -442,7 +541,6 @@ export default function ProductDetailPage() {
             )}
           </View>
 
-          {/* Description */}
           {product.description && (
             <Text
               className="text-neutral-600 mb-5"
@@ -456,7 +554,6 @@ export default function ProductDetailPage() {
             </Text>
           )}
 
-          {/* Details Section */}
           {hasDetails && (
             <View className="mb-5">
               <TouchableOpacity
@@ -599,21 +696,42 @@ export default function ProductDetailPage() {
             </View>
           )}
 
-          {/* More to Explore */}
-          <View className="mt-2 pt-5 border-t" style={{ borderTopColor: theme.colors.neutral[200] }}>
-            <Text
-              className="text-neutral-900 mb-5"
-              style={{
-                fontFamily: typography.fontFamily.serif.medium,
-                fontSize: 18,
-              }}
-            >
-              More to explore
-            </Text>
-            <MasonryLayout
-              onProductPress={handleProductPress}
-              excludeProductId={product.id}
-            />
+          {/* More Like This */}
+          <View
+            className="mt-2 pt-5 border-t"
+            style={{ borderTopColor: theme.colors.neutral[200] }}
+          >
+            {loadingSimilar ? (
+              <>
+                <Text
+                  className="text-neutral-900 mb-5"
+                  style={{
+                    fontFamily: typography.fontFamily.serif.medium,
+                    fontSize: 18,
+                  }}
+                >
+                  More to explore
+                </Text>
+                <MasonryLayout showSkeleton skeletonCount={4} />
+              </>
+            ) : showMoreLikeThis ? (
+              <>
+                <Text
+                  className="text-neutral-900 mb-5"
+                  style={{
+                    fontFamily: typography.fontFamily.serif.medium,
+                    fontSize: 18,
+                  }}
+                >
+                  More to explore
+                </Text>
+                <MasonryLayout
+                  products={similarProducts}
+                  onProductPress={handleProductPress}
+                  excludeProductId={product.id}
+                />
+              </>
+            ) : null}
           </View>
         </Animated.View>
       </ScrollView>
@@ -666,6 +784,7 @@ export default function ProductDetailPage() {
           </TouchableOpacity>
         </View>
       )}
+
       {/* Save to Collection Modal */}
       <Modal
         visible={showSaveModal}
@@ -683,7 +802,6 @@ export default function ProductDetailPage() {
             className="bg-white rounded-t-3xl"
             style={{ maxHeight: "65%" }}
           >
-            {/* Modal Header */}
             <View
               className="flex-row items-center justify-between px-5 py-4 border-b"
               style={{ borderBottomColor: theme.colors.neutral[200] }}
@@ -712,7 +830,6 @@ export default function ProductDetailPage() {
                 paddingBottom: Platform.OS === "ios" ? 40 : 20,
               }}
             >
-              {/* Create New Collection */}
               <View className="mb-5">
                 <Text
                   className="mb-2"
@@ -746,6 +863,10 @@ export default function ProductDetailPage() {
                           newCollectionName.trim()
                         );
                         wardrobe.addToCollection(col.id, id);
+                        if (userId && product) {
+                          interactionService.logInteraction(userId, id, 'save').catch(() => {});
+                          preferenceService.handleInteraction(userId, product, 'save').catch(() => {});
+                        }
                         setNewCollectionName("");
                         setShowSaveModal(false);
                       }
@@ -775,7 +896,6 @@ export default function ProductDetailPage() {
                 </View>
               </View>
 
-              {/* Existing Collections */}
               {wardrobe.userCollections.length > 0 && (
                 <View>
                   <Text
@@ -793,15 +913,7 @@ export default function ProductDetailPage() {
                     return (
                       <TouchableOpacity
                         key={col.id}
-                        onPress={() => {
-                          if (id) {
-                            if (isIn) {
-                              wardrobe.removeFromCollection(col.id, id);
-                            } else {
-                              wardrobe.addToCollection(col.id, id);
-                            }
-                          }
-                        }}
+                        onPress={() => handleSave(col.id)}
                         className="flex-row items-center justify-between py-3.5 border-b"
                         style={{
                           borderBottomColor: theme.colors.neutral[100],

@@ -15,19 +15,18 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { storage } from "@/lib/storage";
-import { UserProfile, UserPreferences } from "@/types";
+import { clientStorage } from "@/lib/clientStorage";
+import { preferenceService } from "@/lib/preferenceService";
+import { UserProfile, UserPreferences, FeedType } from "@/types";
 import { theme } from "@/styles/theme";
 import { typography } from "@/styles/typography";
 import { STATIC_PRODUCTS } from "@/data/staticProducts";
 import { Product } from "@/types";
 
-// Dynamic import for image picker (not available in Expo Go)
 let ImagePicker: typeof import("expo-image-picker") | null = null;
 try {
   ImagePicker = require("expo-image-picker");
-} catch (e) {
-  // Image picker not available (likely in Expo Go)
-}
+} catch (e) {}
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const PRODUCT_CARD_WIDTH = (SCREEN_WIDTH - 48 - 12) / 2;
@@ -40,15 +39,24 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
-
-  // Get some random products for "Recently Viewed" simulation
-  const recentlyViewedProducts = STATIC_PRODUCTS.sort((a, b) => Math.random() - 0.5).slice(0, 4);
+  const [recentlyViewedProducts, setRecentlyViewedProducts] = useState<Product[]>([]);
 
   useEffect(() => {
     if (user) {
       fetchUserData();
+      loadRecentlyViewed();
     }
   }, [user]);
+
+  const loadRecentlyViewed = async () => {
+    if (!user) return;
+    const recentIds = await clientStorage.getRecentlyViewed(user.id);
+    const products = recentIds
+      .map((id) => STATIC_PRODUCTS.find((p) => p.id === id))
+      .filter(Boolean)
+      .slice(0, 4) as Product[];
+    setRecentlyViewedProducts(products);
+  };
 
   const fetchUserData = async () => {
     if (!user) return;
@@ -487,7 +495,7 @@ export default function ProfilePage() {
         </View>
 
         {/* Style Preferences Link */}
-        <View className="px-6 mb-6">
+        <View className="px-6 mb-3">
           <TouchableOpacity
             onPress={() => router.push("/profile/style-preferences")}
             className="flex-row items-center justify-between py-4 px-5 bg-neutral-50 rounded-2xl border border-neutral-200"
@@ -516,6 +524,53 @@ export default function ProfilePage() {
               </View>
             </View>
             <Ionicons name="chevron-forward" size={20} color={theme.colors.neutral[400]} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Retake Style Quiz */}
+        <View className="px-6 mb-6">
+          <TouchableOpacity
+            onPress={async () => {
+              if (!user) return;
+              Alert.alert(
+                "Retake Style Quiz",
+                "This will reset your style preferences and personalized feed. Continue?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Retake",
+                    onPress: async () => {
+                      await preferenceService.resetLearnedPreferences(user.id);
+                      router.push("/(auth)/style-quiz");
+                    },
+                  },
+                ]
+              );
+            }}
+            className="flex-row items-center justify-between py-4 px-5 bg-neutral-50 rounded-2xl border border-neutral-200"
+            activeOpacity={0.7}
+          >
+            <View>
+              <Text
+                className="text-neutral-900"
+                style={{
+                  fontFamily: typography.fontFamily.sans.semibold,
+                  fontSize: 15,
+                }}
+              >
+                Retake Style Quiz
+              </Text>
+              <Text
+                className="text-neutral-500"
+                style={{
+                  fontFamily: typography.fontFamily.sans.regular,
+                  fontSize: 12,
+                }}
+              >
+                Reset your preferences and start fresh
+              </Text>
+            </View>
+            <Ionicons name="refresh-outline" size={20} color={theme.colors.neutral[400]} />
           </TouchableOpacity>
         </View>
 

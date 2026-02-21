@@ -3,6 +3,9 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { storage } from '@/lib/storage';
+import { clientStorage } from '@/lib/clientStorage';
+import { preferenceService } from '@/lib/preferenceService';
 
 const styleOptions = [
   { id: 'minimalist', label: 'Minimalist' },
@@ -66,7 +69,6 @@ export default function StyleQuizScreen() {
 
       if (!user) throw new Error('No user found');
 
-      // Upsert user preferences (allows retaking quiz)
       const { error: prefError } = await supabase
         .from('user_preferences')
         .upsert({
@@ -74,21 +76,64 @@ export default function StyleQuizScreen() {
           style_tags: selectedStyles,
           favorite_colors: selectedColors,
           pattern_preferences: selectedPatterns,
+          // quiz_skipped: false — add column in Supabase first (see supabase/migrations)
         }, {
           onConflict: 'user_id',
         });
 
       if (prefError) throw prefError;
 
-      // Update user profile
       const { error: userError } = await supabase
         .from('users')
-        .update({ style_quiz_completed: true })
+        .update({ style_quiz_completed: true, onboarding_completed: true })
         .eq('id', user.id);
 
       if (userError) throw userError;
 
-      // Navigate to main app
+      await storage.setStyleQuizCompleted(true);
+
+      // Reset style counters + feed cache so personalization uses fresh quiz data
+      await preferenceService.resetLearnedPreferences(user.id);
+
+      // Navigate immediately, feed shows skeleton while loading
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      Alert.alert('Error', error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    try {
+      setLoading(true);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No user found');
+
+      // Create preferences row with all fields null (skip state stored locally; add quiz_skipped column in Supabase to persist)
+      const { error: prefError } = await supabase
+        .from('user_preferences')
+        .upsert({
+          user_id: user.id,
+          style_tags: [],
+          favorite_colors: [],
+          pattern_preferences: [],
+          // quiz_skipped: true — add column in Supabase first (see supabase/migrations)
+        }, {
+          onConflict: 'user_id',
+        });
+
+      if (prefError) throw prefError;
+
+      const { error: userError } = await supabase
+        .from('users')
+        .update({ onboarding_completed: true })
+        .eq('id', user.id);
+
+      if (userError) throw userError;
+
+      await storage.setStyleQuizCompleted(true);
       router.replace('/(tabs)');
     } catch (error: any) {
       Alert.alert('Error', error.message);
@@ -335,6 +380,17 @@ export default function StyleQuizScreen() {
               )}
             </TouchableOpacity>
           </View>
+
+          <TouchableOpacity
+            onPress={handleSkip}
+            disabled={loading}
+            className="mt-3 py-3 items-center"
+            activeOpacity={0.7}
+          >
+            <Text className="text-neutral-500 text-sm font-sans-medium">
+              Skip for now
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
     </SafeAreaView>

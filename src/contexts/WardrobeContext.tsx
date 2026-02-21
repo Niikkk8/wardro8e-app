@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { interactionService } from '../lib/interactionService';
+import { preferenceService } from '../lib/preferenceService';
+import { STATIC_PRODUCTS } from '../data/staticProducts';
 
-// ─── Types ──────────────────────────────────────────────────────────────────
 export interface UserCollection {
   id: string;
   name: string;
@@ -11,17 +13,14 @@ export interface UserCollection {
 }
 
 interface WardrobeContextType {
-  // Favourites
   favouriteIds: string[];
   isFavourited: (productId: string) => boolean;
-  toggleFavourite: (productId: string) => void;
+  toggleFavourite: (productId: string, userId?: string | null) => void;
 
-  // Saved community collections
   savedCollectionIds: string[];
   isCollectionSaved: (collectionId: string) => boolean;
   toggleSaveCollection: (collectionId: string) => void;
 
-  // User-created collections
   userCollections: UserCollection[];
   createCollection: (name: string, description?: string) => UserCollection;
   deleteCollection: (collectionId: string) => void;
@@ -110,12 +109,23 @@ export function WardrobeProvider({ children }: { children: React.ReactNode }) {
   );
 
   const toggleFavourite = useCallback(
-    (productId: string) => {
+    (productId: string, userId?: string | null) => {
       setFavouriteIds((prev) => {
-        const next = prev.includes(productId)
+        const wasLiked = prev.includes(productId);
+        const next = wasLiked
           ? prev.filter((id) => id !== productId)
           : [...prev, productId];
         persistFavourites(next);
+
+        // Log like interaction for new likes
+        if (!wasLiked && userId) {
+          interactionService.logInteraction(userId, productId, 'like').catch(() => {});
+          const product = STATIC_PRODUCTS.find((p) => p.id === productId);
+          if (product) {
+            preferenceService.handleInteraction(userId, product, 'like').catch(() => {});
+          }
+        }
+
         return next;
       });
     },

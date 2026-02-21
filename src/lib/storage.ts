@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { clientStorage } from './clientStorage';
 
 const STORAGE_KEYS = {
   ONBOARDING_COMPLETED: '@wardro8e:onboarding_completed',
@@ -74,7 +75,7 @@ export const storage = {
   },
 
   // Clear all storage (logout)
-  async clearAll(): Promise<void> {
+  async clearAll(userId?: string): Promise<void> {
     try {
       await AsyncStorage.multiRemove([
         STORAGE_KEYS.ONBOARDING_COMPLETED,
@@ -82,6 +83,10 @@ export const storage = {
         STORAGE_KEYS.STYLE_QUIZ_COMPLETED,
         STORAGE_KEYS.USER_TOKEN,
       ]);
+      // Clear recommendation/personalization data
+      if (userId) {
+        await clientStorage.clearAllRecommendationData(userId);
+      }
     } catch (error) {
       console.error('Error clearing storage:', error);
     }
