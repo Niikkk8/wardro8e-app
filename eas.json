@@ -10,7 +10,8 @@
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease",
-        "applicationArchivePath": "android/app/build/outputs/apk/release/app-release.apk"
+        "applicationArchivePath": "android/app/build/outputs/apk/release/app-release.apk",
+        "image": "ubuntu-22.04-jdk-17-ndk-r26b"
       },
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
@@ -22,7 +23,8 @@
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease",
-        "applicationArchivePath": "android/app/build/outputs/apk/release/app-release.apk"
+        "applicationArchivePath": "android/app/build/outputs/apk/release/app-release.apk",
+        "image": "ubuntu-22.04-jdk-17-ndk-r26b"
       },
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
@@ -34,7 +36,8 @@
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease",
-        "applicationArchivePath": "android/app/build/outputs/apk/release/app-release.apk"
+        "applicationArchivePath": "android/app/build/outputs/apk/release/app-release.apk",
+        "image": "ubuntu-22.04-jdk-17-ndk-r26b"
       },
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
