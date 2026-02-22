@@ -14,7 +14,8 @@
       },
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
-      }
+      },
+      "prebuildCommand": "npx expo prebuild --clean"
     },
     "preview": {
       "distribution": "internal",
@@ -25,7 +26,8 @@
       },
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
-      }
+      },
+      "prebuildCommand": "npx expo prebuild --clean"
     },
     "production": {
       "autoIncrement": true,
@@ -36,7 +38,8 @@
       },
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
-      }
+      },
+      "prebuildCommand": "npx expo prebuild --clean"
     }
   },
   "submit": {
