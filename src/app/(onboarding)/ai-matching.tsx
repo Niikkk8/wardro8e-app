@@ -1,11 +1,21 @@
-import { View, Text, TouchableOpacity, Image, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, Image, Animated, Modal, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { storage } from '@/lib/storage';
+
+const formatDate = (date: Date): string => {
+  const d = date.getDate().toString().padStart(2, '0');
+  const m = (date.getMonth() + 1).toString().padStart(2, '0');
+  const y = date.getFullYear();
+  return `${d}/${m}/${y}`;
+};
 
 export default function AIMatchingScreen() {
   const router = useRouter();
+  const [birthday, setBirthday] = useState<Date | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
 
@@ -63,7 +73,70 @@ export default function AIMatchingScreen() {
           <Text className="text-sm text-neutral-600 text-center px-8 leading-5">
             Save your favorites, create wishlists, and share inspiration with friends
           </Text>
+
+          {/* Optional birthday – opens date picker */}
+          <View className="w-full max-w-xs mt-8">
+            <Text className="text-sm text-neutral-600 mb-2 text-center">Optional: add your birthday for better recommendations</Text>
+            <TouchableOpacity
+              onPress={() => setShowDatePicker(true)}
+              className="bg-neutral-50 border border-neutral-200 rounded-xl h-12 px-4 flex-row items-center justify-center"
+            >
+              <Text className={birthday ? 'text-neutral-900 font-sans-medium' : 'text-neutral-400'}>
+                {birthday ? formatDate(birthday) : 'Select birthday'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </Animated.View>
+
+        {/* Date picker: Modal on iOS, inline on Android */}
+        {Platform.OS === 'ios' ? (
+          <Modal visible={showDatePicker} transparent animationType="slide" onRequestClose={() => setShowDatePicker(false)}>
+            <View className="flex-1 bg-black/50 justify-end">
+              <TouchableOpacity className="flex-1" activeOpacity={1} onPress={() => setShowDatePicker(false)} />
+              <View className="bg-white rounded-t-3xl p-6" style={{ paddingBottom: Platform.OS === 'ios' ? 34 : 24 }}>
+                <View className="w-12 h-1 bg-neutral-200 rounded-full self-center mb-4" />
+                <Text className="text-lg font-serif-bold text-neutral-900 mb-4 text-center">Select your birthday</Text>
+                <DateTimePicker
+                  value={birthday ?? new Date()}
+                  mode="date"
+                  display="spinner"
+                  maximumDate={new Date()}
+                  onChange={(event, selectedDate) => {
+                    if (event.type === 'set' && selectedDate) setBirthday(selectedDate);
+                  }}
+                  style={{ backgroundColor: 'white' }}
+                />
+                <View className="flex-row gap-3 mt-4">
+                  <TouchableOpacity
+                    onPress={() => { setBirthday(null); setShowDatePicker(false); }}
+                    className="flex-1 border-2 border-neutral-200 rounded-xl h-12 items-center justify-center"
+                  >
+                    <Text className="text-neutral-700 font-sans-medium">Clear</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setShowDatePicker(false)}
+                    className="flex-1 bg-primary-500 rounded-xl h-12 items-center justify-center"
+                  >
+                    <Text className="text-white font-sans-semibold">Done</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+        ) : (
+          showDatePicker && (
+            <DateTimePicker
+              value={birthday ?? new Date()}
+              mode="date"
+              display="default"
+              maximumDate={new Date()}
+              onChange={(event, selectedDate) => {
+                setShowDatePicker(false);
+                if (event.type === 'set' && selectedDate) setBirthday(selectedDate);
+              }}
+            />
+          )
+        )}
 
         {/* Bottom Actions */}
         <View>

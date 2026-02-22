@@ -10,7 +10,6 @@ import {
 import { theme } from '../../styles/theme';
 import { typography } from '../../styles/typography';
 import { Product } from '../../types';
-import { STATIC_PRODUCTS } from '../../data/staticProducts';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COLUMN_COUNT = 2;
@@ -24,6 +23,8 @@ interface MasonryLayoutProps {
   excludeProductId?: string;
   showSkeleton?: boolean;
   skeletonCount?: number;
+  /** Shown below "No products found" when products list is empty */
+  emptyStateSubtext?: string;
 }
 
 function distributeIntoColumns(items: Product[]): Product[][] {
@@ -47,10 +48,11 @@ export default function MasonryLayout({
   excludeProductId,
   showSkeleton = false,
   skeletonCount = 6,
+  emptyStateSubtext,
 }: MasonryLayoutProps) {
   const products = externalProducts
     ? (excludeProductId ? externalProducts.filter((p) => p.id !== excludeProductId) : externalProducts)
-    : (excludeProductId ? STATIC_PRODUCTS.filter((p) => p.id !== excludeProductId) : STATIC_PRODUCTS);
+    : [];
 
   if (showSkeleton) {
     return <SkeletonGrid count={skeletonCount} />;
@@ -58,8 +60,11 @@ export default function MasonryLayout({
 
   if (products.length === 0) {
     return (
-      <View className="flex-1 items-center justify-center py-12">
+      <View className="flex-1 items-center justify-center py-12 px-6">
         <Text className="text-neutral-600 text-base">No products found</Text>
+        {emptyStateSubtext ? (
+          <Text className="text-neutral-400 text-sm mt-2 text-center">{emptyStateSubtext}</Text>
+        ) : null}
       </View>
     );
   }

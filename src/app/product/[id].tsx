@@ -12,6 +12,7 @@ import {
   Modal,
   TextInput,
   Platform,
+  KeyboardAvoidingView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,7 +20,7 @@ import { useLocalSearchParams, router } from "expo-router";
 import { theme } from "../../styles/theme";
 import { typography } from "../../styles/typography";
 import { Product } from "../../types";
-import { STATIC_PRODUCTS } from "../../data/staticProducts";
+import { getProductById } from "../../lib/productsApi";
 import MasonryLayout from "../../components/layouts/MasonryLayout";
 import { useWardrobe } from "../../contexts/WardrobeContext";
 import { useAuth } from "../../contexts/AuthContext";
@@ -118,7 +119,7 @@ export default function ProductDetailPage() {
         }
       }
 
-      const foundProduct = STATIC_PRODUCTS.find((p) => p.id === id);
+      const foundProduct = id ? await getProductById(id) : null;
       if (foundProduct) {
         setProduct(foundProduct);
         await clientStorage.setCachedProduct(foundProduct);
@@ -138,7 +139,7 @@ export default function ProductDetailPage() {
       viewLogged.current = true;
       const logged = await interactionService.logInteraction(userId, id, 'view');
       if (logged) {
-        const prod = STATIC_PRODUCTS.find((p) => p.id === id);
+        const prod = id ? await getProductById(id) : null;
         if (prod) {
           preferenceService.handleInteraction(userId, prod, 'view').catch(() => {});
         }
@@ -148,7 +149,7 @@ export default function ProductDetailPage() {
     // C: Fetch similar products
     setLoadingSimilar(true);
     try {
-      const prod = STATIC_PRODUCTS.find((p) => p.id === id);
+      const prod = id ? await getProductById(id) : null;
       if (prod) {
         const seenIds = userId ? await clientStorage.getSeenProductIds(userId) : [];
         const similar = await recommendationService.getSimilarProducts(prod, 12, seenIds);
@@ -792,16 +793,21 @@ export default function ProductDetailPage() {
         animationType="slide"
         onRequestClose={() => setShowSaveModal(false)}
       >
-        <View className="flex-1" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
-          <TouchableOpacity
-            className="flex-1"
-            onPress={() => setShowSaveModal(false)}
-            activeOpacity={1}
-          />
-          <View
-            className="bg-white rounded-t-3xl"
-            style={{ maxHeight: "65%" }}
-          >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ flex: 1 }}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
+        >
+          <View className="flex-1" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
+            <TouchableOpacity
+              className="flex-1"
+              onPress={() => setShowSaveModal(false)}
+              activeOpacity={1}
+            />
+            <View
+              className="bg-white rounded-t-3xl"
+              style={{ maxHeight: "65%" }}
+            >
             <View
               className="flex-row items-center justify-between px-5 py-4 border-b"
               style={{ borderBottomColor: theme.colors.neutral[200] }}
@@ -825,6 +831,7 @@ export default function ProductDetailPage() {
             </View>
 
             <ScrollView
+              keyboardShouldPersistTaps="handled"
               contentContainerStyle={{
                 padding: 20,
                 paddingBottom: Platform.OS === "ios" ? 40 : 20,
@@ -964,6 +971,7 @@ export default function ProductDetailPage() {
             </ScrollView>
           </View>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

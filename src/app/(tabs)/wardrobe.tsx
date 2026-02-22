@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   TextInput,
   Alert,
   Platform,
+  ActivityIndicator,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,8 +19,8 @@ import { router } from 'expo-router';
 import { theme } from '../../styles/theme';
 import { typography } from '../../styles/typography';
 import { Product } from '../../types';
-import { STATIC_PRODUCTS } from '../../data/staticProducts';
-import { COLLECTIONS, Collection } from '../../data/collections';
+import { getCollections, Collection } from '../../data/collections';
+import { getProducts } from '../../lib/productsApi';
 import { useWardrobe, UserCollection } from '../../contexts/WardrobeContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -29,27 +31,36 @@ type Tab = 'favourites' | 'collections';
 
 export default function WardrobePage() {
   const wardrobe = useWardrobe();
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('favourites');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
 
-  // Get favourite products
+  useEffect(() => {
+    getProducts({ limit: 300 }).then((products) => {
+      setAllProducts(products);
+      setLoading(false);
+    });
+  }, []);
+
+  const collections = useMemo(() => getCollections(allProducts), [allProducts]);
+
   const favouriteProducts = useMemo(
     () =>
       wardrobe.favouriteIds
-        .map((id) => STATIC_PRODUCTS.find((p) => p.id === id))
+        .map((id) => allProducts.find((p) => p.id === id))
         .filter(Boolean) as Product[],
-    [wardrobe.favouriteIds]
+    [wardrobe.favouriteIds, allProducts]
   );
 
-  // Get saved community collections
   const savedCommunityCollections = useMemo(
     () =>
       wardrobe.savedCollectionIds
-        .map((id) => COLLECTIONS.find((c) => c.id === id))
+        .map((id) => collections.find((c) => c.id === id))
         .filter(Boolean) as Collection[],
-    [wardrobe.savedCollectionIds]
+    [wardrobe.savedCollectionIds, collections]
   );
 
   const handleCreateCollection = useCallback(() => {
@@ -78,6 +89,16 @@ export default function WardrobePage() {
     },
     [wardrobe]
   );
+
+  if (loading) {
+    return (
+      <SafeAreaView edges={['top']} className="flex-1 bg-white">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-white">
@@ -147,11 +168,11 @@ export default function WardrobePage() {
         />
       ) : (
         <CollectionsTab
+          allProducts={allProducts}
           savedCollections={savedCommunityCollections}
           userCollections={wardrobe.userCollections}
           onCommunityPress={(id) => router.push(`/collection/${id}`)}
           onUserCollectionPress={(col) => {
-            // Navigate to first product or show collection
             if (col.productIds.length > 0) {
               router.push(`/product/${col.productIds[0]}`);
             }
@@ -170,17 +191,22 @@ export default function WardrobePage() {
         animationType="slide"
         onRequestClose={() => setShowCreateModal(false)}
       >
-        <View className="flex-1" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}>
-          <TouchableOpacity
-            className="flex-1"
-            onPress={() => setShowCreateModal(false)}
-            activeOpacity={1}
-          />
-          <View className="bg-white rounded-t-3xl">
-            <View
-              className="flex-row items-center justify-between px-5 py-4 border-b"
-              style={{ borderBottomColor: theme.colors.neutral[200] }}
-            >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          className="flex-1"
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+        >
+          <View className="flex-1" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}>
+            <TouchableOpacity
+              className="flex-1"
+              onPress={() => setShowCreateModal(false)}
+              activeOpacity={1}
+            />
+            <View className="bg-white rounded-t-3xl">
+              <View
+                className="flex-row items-center justify-between px-5 py-4 border-b"
+                style={{ borderBottomColor: theme.colors.neutral[200] }}
+              >
               <Text
                 style={{
                   fontFamily: typography.fontFamily.serif.medium,
@@ -275,6 +301,7 @@ export default function WardrobePage() {
             </View>
           </View>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -531,6 +558,7 @@ function FavouriteItem({
 
 // ─── Collections Tab ────────────────────────────────────────────────────────
 function CollectionsTab({
+  allProducts,
   savedCollections,
   userCollections,
   onCommunityPress,
@@ -540,6 +568,7 @@ function CollectionsTab({
   onCreateNew,
   onProductPress,
 }: {
+  allProducts: Product[];
   savedCollections: Collection[];
   userCollections: UserCollection[];
   onCommunityPress: (id: string) => void;
@@ -620,6 +649,7 @@ function CollectionsTab({
             {userCollections.map((col) => (
               <UserCollectionCard
                 key={col.id}
+                allProducts={allProducts}
                 collection={col}
                 onPress={() => onUserCollectionPress(col)}
                 onDelete={() => onDelete(col)}
@@ -663,24 +693,25 @@ function CollectionsTab({
 
 // ─── User Collection Card ───────────────────────────────────────────────────
 function UserCollectionCard({
+  allProducts,
   collection,
   onPress,
   onDelete,
   onProductPress,
 }: {
+  allProducts: Product[];
   collection: UserCollection;
   onPress: () => void;
   onDelete: () => void;
   onProductPress: (id: string) => void;
 }) {
-  // Get first 3 product images for preview
   const previewProducts = useMemo(
     () =>
       collection.productIds
         .slice(0, 3)
-        .map((id) => STATIC_PRODUCTS.find((p) => p.id === id))
+        .map((id) => allProducts.find((p) => p.id === id))
         .filter(Boolean) as Product[],
-    [collection.productIds]
+    [collection.productIds, allProducts]
   );
 
   return (

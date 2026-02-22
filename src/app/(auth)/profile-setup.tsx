@@ -23,12 +23,20 @@ export default function ProfileSetupScreen() {
 
   const selectedGenderLabel = genderOptions.find(opt => opt.value === gender)?.label || '';
 
-  // Format date explicitly as DD/MM/YYYY to avoid locale issues
+  // Display: DD/MM/YYYY for user-facing text
   const formatDateAsDDMMYYYY = (date: Date): string => {
     const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0'); // getMonth() is 0-indexed
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const year = date.getFullYear();
     return `${day}/${month}/${year}`;
+  };
+
+  // Storage/API: YYYY-MM-DD (ISO) so DB never misparses as MM/DD/YYYY
+  const formatDateAsISO = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
   };
 
   const handleContinue = async () => {
@@ -61,9 +69,9 @@ export default function ProfileSetupScreen() {
       // Use existing avatar_url if available, otherwise use OAuth avatar_url
       const avatarUrl = existingProfile?.avatar_url || oauthAvatarUrl;
 
-      // Format birthday as DD/MM/YYYY for storage (explicit formatting to avoid locale issues)
-      const formattedBirthday = birthday 
-        ? formatDateAsDDMMYYYY(birthday)
+      // Store birthday as YYYY-MM-DD (ISO) so DB/Postgres never misparses (avoids "value out of range" for DD/MM)
+      const formattedBirthday = birthday
+        ? formatDateAsISO(birthday)
         : null;
 
       // Upsert user profile (creates if doesn't exist, updates if does)
@@ -127,7 +135,8 @@ export default function ProfileSetupScreen() {
                   <TextInput
                     value={fullName}
                     onChangeText={setFullName}
-                    placeholder="Enter your name"
+                    placeholder="Your name"
+                    placeholderTextColor="#a3a3a3"
                     className="bg-neutral-50 border border-neutral-200 rounded-xl h-12 px-4 text-base"
                   />
                 </View>

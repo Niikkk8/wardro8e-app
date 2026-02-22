@@ -18,9 +18,9 @@ import { router } from 'expo-router';
 import { theme } from '../../styles/theme';
 import { typography } from '../../styles/typography';
 import { Product } from '../../types';
-import { STATIC_PRODUCTS } from '../../data/staticProducts';
+import { getProducts } from '../../lib/productsApi';
 import {
-  COLLECTIONS,
+  getCollections,
   Collection,
   getTrendingProducts,
   getCategories,
@@ -57,12 +57,17 @@ export default function DiscoverPage() {
   const [filters, setFilters] = useState<ActiveFilters>(DEFAULT_FILTERS);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [tempFilters, setTempFilters] = useState<ActiveFilters>(DEFAULT_FILTERS);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
   const searchInputRef = useRef<TextInput>(null);
 
-  // Pre-compute data
-  const trendingProducts = useMemo(() => getTrendingProducts(15), []);
-  const categories = useMemo(() => getCategories(), []);
-  const filterOptions = useMemo(() => getFilterOptions(), []);
+  useEffect(() => {
+    getProducts({ limit: 300 }).then(setAllProducts);
+  }, []);
+
+  const collections = useMemo(() => getCollections(allProducts), [allProducts]);
+  const trendingProducts = useMemo(() => getTrendingProducts(allProducts, 15), [allProducts]);
+  const categories = useMemo(() => getCategories(allProducts), [allProducts]);
+  const filterOptions = useMemo(() => getFilterOptions(allProducts), [allProducts]);
 
   // Check if any filters are active
   const hasActiveFilters = useMemo(() => {
@@ -82,7 +87,7 @@ export default function DiscoverPage() {
   const searchResults = useMemo(() => {
     if (!isSearchActive) return [];
 
-    let results = [...STATIC_PRODUCTS];
+    let results = [...allProducts];
     const query = searchQuery.toLowerCase().trim();
 
     // Text search
@@ -160,7 +165,7 @@ export default function DiscoverPage() {
     }
 
     return results;
-  }, [searchQuery, filters, isSearchActive]);
+  }, [allProducts, searchQuery, filters, isSearchActive]);
 
   // Active filter count for badge
   const activeFilterCount = useMemo(() => {
@@ -268,9 +273,12 @@ export default function DiscoverPage() {
               style={{
                 flex: 1,
                 marginLeft: 10,
+                height: 44,
+                paddingVertical: 0,
                 fontFamily: typography.fontFamily.sans.regular,
                 fontSize: 15,
                 color: theme.colors.neutral[900],
+                ...(Platform.OS === 'android' && { textAlignVertical: 'center' }),
               }}
               returnKeyType="search"
             />
@@ -386,9 +394,10 @@ export default function DiscoverPage() {
         />
       ) : (
         <DefaultDiscoverView
+          allProducts={allProducts}
           trendingProducts={trendingProducts}
           categories={categories}
-          collections={COLLECTIONS}
+          collections={collections}
           onProductPress={handleProductPress}
           onCategoryPress={handleCategoryPress}
         />
@@ -410,12 +419,14 @@ export default function DiscoverPage() {
 
 // ─── Default Discover View (no search) ──────────────────────────────────────
 function DefaultDiscoverView({
+  allProducts,
   trendingProducts,
   categories,
   collections,
   onProductPress,
   onCategoryPress,
 }: {
+  allProducts: Product[];
   trendingProducts: Product[];
   categories: { name: string; count: number; icon: string }[];
   collections: Collection[];
@@ -427,8 +438,49 @@ function DefaultDiscoverView({
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{ paddingBottom: 100 }}
     >
+      {/* ── View all products ───────────────────────────── */}
+      <View className="mt-5 px-4">
+        <TouchableOpacity
+          onPress={() => router.push('/products')}
+          className="flex-row items-center justify-between py-4 px-5 rounded-2xl border"
+          style={{ backgroundColor: theme.colors.primary[50], borderColor: theme.colors.primary[200] }}
+          activeOpacity={0.7}
+        >
+          <View className="flex-row items-center gap-3">
+            <View
+              className="items-center justify-center rounded-xl"
+              style={{ width: 44, height: 44, backgroundColor: theme.colors.primary[100] }}
+            >
+              <Ionicons name="grid-outline" size={22} color={theme.colors.primary[600]} />
+            </View>
+            <View>
+              <Text
+                style={{
+                  fontFamily: typography.fontFamily.sans.semibold,
+                  fontSize: 16,
+                  color: theme.colors.neutral[900],
+                }}
+              >
+                View all products
+              </Text>
+              <Text
+                style={{
+                  fontFamily: typography.fontFamily.sans.regular,
+                  fontSize: 12,
+                  color: theme.colors.neutral[500],
+                  marginTop: 2,
+                }}
+              >
+                Browse the full catalog
+              </Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={22} color={theme.colors.neutral[500]} />
+        </TouchableOpacity>
+      </View>
+
       {/* ── Trending Now ────────────────────────────────── */}
-      <View className="mt-5">
+      <View className="mt-8">
         <SectionHeader
           title="Trending Now"
         />
@@ -509,6 +561,7 @@ function DefaultDiscoverView({
           {categories.map((cat) => (
             <CategoryCard
               key={cat.name}
+              allProducts={allProducts}
               name={cat.name}
               count={cat.count}
               icon={cat.icon}
@@ -524,7 +577,7 @@ function DefaultDiscoverView({
           title="New Arrivals"
         />
         <FlatList
-          data={STATIC_PRODUCTS.slice(-12).reverse()}
+          data={[...allProducts].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).slice(0, 12)}
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: theme.spacing.lg, gap: CARD_GAP }}
@@ -884,10 +937,12 @@ function CollectionCard({
 
 // ─── Category Card ──────────────────────────────────────────────────────────
 function CategoryCard({
+  allProducts,
   name,
   count,
   onPress,
 }: {
+  allProducts: Product[];
   name: string;
   count: number;
   icon: string;
@@ -895,11 +950,10 @@ function CategoryCard({
 }) {
   const cardWidth = (SCREEN_WIDTH - theme.spacing.lg * 2 - CARD_GAP) / 2;
 
-  // Grab the first product image from this category as a background
   const coverImage = useMemo(() => {
-    const product = STATIC_PRODUCTS.find((p) => p.category === name && p.image_urls?.[0]);
+    const product = allProducts.find((p) => p.category === name && p.image_urls?.[0]);
     return product?.image_urls[0] || null;
-  }, [name]);
+  }, [name, allProducts]);
 
   return (
     <TouchableOpacity

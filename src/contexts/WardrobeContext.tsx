@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { interactionService } from '../lib/interactionService';
 import { preferenceService } from '../lib/preferenceService';
-import { STATIC_PRODUCTS } from '../data/staticProducts';
+import { getProductById } from '../lib/productsApi';
 
 export interface UserCollection {
   id: string;
@@ -117,13 +117,11 @@ export function WardrobeProvider({ children }: { children: React.ReactNode }) {
           : [...prev, productId];
         persistFavourites(next);
 
-        // Log like interaction for new likes
         if (!wasLiked && userId) {
           interactionService.logInteraction(userId, productId, 'like').catch(() => {});
-          const product = STATIC_PRODUCTS.find((p) => p.id === productId);
-          if (product) {
-            preferenceService.handleInteraction(userId, product, 'like').catch(() => {});
-          }
+          getProductById(productId).then((product) => {
+            if (product) preferenceService.handleInteraction(userId, product, 'like').catch(() => {});
+          });
         }
 
         return next;

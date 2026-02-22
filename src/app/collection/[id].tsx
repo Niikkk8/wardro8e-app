@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Image,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,10 +14,8 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { theme } from '../../styles/theme';
 import { typography } from '../../styles/typography';
 import { Product } from '../../types';
-import {
-  COLLECTIONS,
-  getCollectionProducts,
-} from '../../data/collections';
+import { getCollections, getCollectionProducts } from '../../data/collections';
+import { getProducts } from '../../lib/productsApi';
 import { useWardrobe } from '../../contexts/WardrobeContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -26,17 +25,36 @@ const COLUMN_WIDTH = (SCREEN_WIDTH - theme.spacing.lg * 2 - GAP) / 2;
 export default function CollectionDetailPage() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const wardrobe = useWardrobe();
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
   const isSaved = id ? wardrobe.isCollectionSaved(id) : false;
 
+  useEffect(() => {
+    getProducts({ limit: 300 }).then((products) => {
+      setAllProducts(products);
+      setLoading(false);
+    });
+  }, []);
+
   const collection = useMemo(
-    () => COLLECTIONS.find((c) => c.id === id),
-    [id]
+    () => getCollections(allProducts).find((c) => c.id === id),
+    [id, allProducts]
   );
 
   const products = useMemo(
-    () => (id ? getCollectionProducts(id) : []),
-    [id]
+    () => (id ? getCollectionProducts(id, allProducts) : []),
+    [id, allProducts]
   );
+
+  if (loading) {
+    return (
+      <SafeAreaView edges={['top']} className="flex-1 bg-white">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!collection) {
     return (

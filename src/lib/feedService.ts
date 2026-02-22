@@ -1,8 +1,8 @@
 import { supabase } from './supabase';
 import { clientStorage } from './clientStorage';
 import { interactionService } from './interactionService';
+import { getProducts, getProductsByIds } from './productsApi';
 import { Product, FeedType, FeedOptions, UserPreferences } from '../types';
-import { STATIC_PRODUCTS } from '../data/staticProducts';
 
 const DEFAULT_LIMIT = 20;
 
@@ -159,39 +159,40 @@ export const feedService = {
   },
 
   /**
-   * Cold Start Feed: trending/featured products.
+   * Cold Start Feed: trending/featured products from DB.
    */
-  getColdStartFeed(options: FeedOptions = {}): Product[] {
+  async getColdStartFeed(options: FeedOptions = {}): Promise<Product[]> {
     const { limit = DEFAULT_LIMIT, offset = 0, excludeIds = [], gender } = options;
 
-    let products = [...STATIC_PRODUCTS].filter((p) => p.is_active);
-    products = applyGenderFilter(products, gender);
-    products = applyExcludeFilter(products, excludeIds);
-
-    // Sort: featured first, then by index (proxy for recency)
-    products.sort((a, b) => {
-      if (a.is_featured && !b.is_featured) return -1;
-      if (!a.is_featured && b.is_featured) return 1;
-      return 0;
+    const fetched = await getProducts({
+      limit: Math.max(limit + excludeIds.length + 100, 100),
+      offset: 0,
+      gender,
+      orderBy: ['is_featured', 'created_at'],
+      orderAsc: [false, false],
     });
 
+    let products = applyExcludeFilter(fetched, excludeIds);
     products = applyBrandDiversityCap(products);
     return paginate(products, limit, offset);
   },
 
   /**
-   * Preference Feed: scored by style/color/pattern match.
+   * Preference Feed: scored by style/color/pattern match (products from DB).
    */
-  getPreferenceFeed(prefs: UserPreferences, options: FeedOptions = {}): Product[] {
+  async getPreferenceFeed(prefs: UserPreferences, options: FeedOptions = {}): Promise<Product[]> {
     const { limit = DEFAULT_LIMIT, offset = 0, excludeIds = [], gender } = options;
 
-    let products = [...STATIC_PRODUCTS].filter((p) => p.is_active);
-    products = applyGenderFilter(products, gender || prefs.gender);
-    products = applyExcludeFilter(products, excludeIds);
+    const fetched = await getProducts({
+      limit: 200,
+      offset: 0,
+      gender: gender || prefs.gender || undefined,
+      excludeIds,
+    });
 
-    const scored = products.map((p) => ({
+    const scored = fetched.map((p) => ({
       product: p,
-      score: scoreByPreferences(p, prefs) + Math.random() * 0.5, // Small random jitter
+      score: scoreByPreferences(p, prefs) + Math.random() * 0.5,
     }));
 
     scored.sort((a, b) => b.score - a.score);
@@ -219,11 +220,16 @@ export const feedService = {
       .slice(0, 5)
       .map(([id]) => id);
 
-    const anchors = STATIC_PRODUCTS.filter((p) => anchorIds.includes(p.id));
+    const anchors = await getProductsByIds(anchorIds);
 
-    let products = [...STATIC_PRODUCTS].filter((p) => p.is_active);
-    products = applyGenderFilter(products, gender || prefs?.gender);
-    products = applyExcludeFilter(products, excludeIds);
+    const fetched = await getProducts({
+      limit: 200,
+      offset: 0,
+      gender: gender || prefs?.gender || undefined,
+      excludeIds,
+    });
+
+    let products = fetched;
 
     // Score each candidate
     const scored = products.map((candidate) => {
@@ -280,11 +286,17 @@ export const feedService = {
     const { forceRefresh = false, ...feedOptions } = options;
     const effectiveUserId = userId || 'guest';
 
-    // Check cache (only for first page)
+    // Check cache (only for first page); skip cache if it's empty so we always refetch
     if (!forceRefresh && (feedOptions.offset || 0) === 0) {
       const cache = await clientStorage.getFeedCache(effectiveUserId);
-      if (cache) {
+      if (cache && cache.data.length > 0) {
+        if (__DEV__) {
+          console.log('[Feed] Serving from cache:', cache.data.length, 'products');
+        }
         return { products: cache.data, feedType: cache.feed_type, fromCache: true };
+      }
+      if (cache && cache.data.length === 0 && __DEV__) {
+        console.log('[Feed] Ignoring empty cache, fetching from API');
       }
     }
 
@@ -307,6 +319,9 @@ export const feedService = {
 
     // Determine feed type
     const feedType = await this.determineFeedType(userId);
+    if (__DEV__) {
+      console.log('[Feed] Loading feed from API, type:', feedType);
+    }
 
     let products: Product[];
 
@@ -319,14 +334,14 @@ export const feedService = {
       case 'preference': {
         const prefs = await this.getUserPreferences(userId!);
         if (prefs) {
-          products = this.getPreferenceFeed(prefs, mergedOptions);
+          products = await this.getPreferenceFeed(prefs, mergedOptions);
         } else {
-          products = this.getColdStartFeed(mergedOptions);
+          products = await this.getColdStartFeed(mergedOptions);
         }
         break;
       }
       default:
-        products = this.getColdStartFeed(mergedOptions);
+        products = await this.getColdStartFeed(mergedOptions);
     }
 
     // Cache first page
@@ -334,6 +349,9 @@ export const feedService = {
       await clientStorage.setFeedCache(effectiveUserId, products, feedType);
     }
 
+    if (__DEV__) {
+      console.log('[Feed] API returned', products.length, 'products');
+    }
     return { products, feedType, fromCache: false };
   },
 };

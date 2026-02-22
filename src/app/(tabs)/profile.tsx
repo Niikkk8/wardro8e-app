@@ -20,8 +20,8 @@ import { preferenceService } from "@/lib/preferenceService";
 import { UserProfile, UserPreferences, FeedType } from "@/types";
 import { theme } from "@/styles/theme";
 import { typography } from "@/styles/typography";
-import { STATIC_PRODUCTS } from "@/data/staticProducts";
 import { Product } from "@/types";
+import { getProductsByIds } from "@/lib/productsApi";
 
 let ImagePicker: typeof import("expo-image-picker") | null = null;
 try {
@@ -51,11 +51,16 @@ export default function ProfilePage() {
   const loadRecentlyViewed = async () => {
     if (!user) return;
     const recentIds = await clientStorage.getRecentlyViewed(user.id);
-    const products = recentIds
-      .map((id) => STATIC_PRODUCTS.find((p) => p.id === id))
-      .filter(Boolean)
-      .slice(0, 4) as Product[];
-    setRecentlyViewedProducts(products);
+    const idsToFetch = recentIds.slice(0, 4);
+    if (idsToFetch.length === 0) {
+      setRecentlyViewedProducts([]);
+      return;
+    }
+    const fetched = await getProductsByIds(idsToFetch);
+    const ordered = idsToFetch
+      .map((id) => fetched.find((p) => p.id === id))
+      .filter(Boolean) as Product[];
+    setRecentlyViewedProducts(ordered);
   };
 
   const fetchUserData = async () => {
@@ -110,13 +115,18 @@ export default function ProfilePage() {
   const parseDate = (dateString?: string): Date | null => {
     if (!dateString) return null;
     try {
+      // ISO from DB: YYYY-MM-DD
+      if (dateString.includes("-") && dateString.length >= 10) {
+        const parts = dateString.split("-").map((p) => parseInt(p, 10));
+        if (parts.length >= 3 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1]) && !Number.isNaN(parts[2])) {
+          return new Date(parts[0], parts[1] - 1, parts[2]);
+        }
+      }
+      // Legacy DD/MM/YYYY
       if (dateString.includes("/")) {
-        const parts = dateString.split("/");
-        if (parts.length === 3) {
-          const day = parseInt(parts[0], 10);
-          const month = parseInt(parts[1], 10) - 1;
-          const year = parseInt(parts[2], 10);
-          return new Date(year, month, day);
+        const parts = dateString.split("/").map((p) => parseInt(p, 10));
+        if (parts.length === 3 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1]) && !Number.isNaN(parts[2])) {
+          return new Date(parts[2], parts[1] - 1, parts[0]);
         }
       }
       return new Date(dateString);
@@ -125,17 +135,16 @@ export default function ProfilePage() {
     }
   };
 
+  // Display birthday as DD/MM/YYYY (Indian format)
   const formatDate = (dateString?: string) => {
     if (!dateString) return null;
     try {
       const date = parseDate(dateString);
       if (!date) return dateString;
-
-      return date.toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      });
+      const day = date.getDate().toString().padStart(2, "0");
+      const month = (date.getMonth() + 1).toString().padStart(2, "0");
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
     } catch {
       return dateString;
     }
@@ -528,7 +537,7 @@ export default function ProfilePage() {
         </View>
 
         {/* Retake Style Quiz */}
-        <View className="px-6 mb-6">
+        <View className="px-6 mb-3">
           <TouchableOpacity
             onPress={async () => {
               if (!user) return;
@@ -571,6 +580,66 @@ export default function ProfilePage() {
               </Text>
             </View>
             <Ionicons name="refresh-outline" size={20} color={theme.colors.neutral[400]} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Reset preferences & data */}
+        <View className="px-6 mb-6">
+          <TouchableOpacity
+            onPress={async () => {
+              if (!user) return;
+              Alert.alert(
+                "Reset preferences & data",
+                "This will clear your feed cache, recently viewed, style counters, and learned preferences. Your account and saved items stay. Continue?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Reset",
+                    style: "destructive",
+                    onPress: async () => {
+                      try {
+                        await clientStorage.clearAllRecommendationData(user.id);
+                        await preferenceService.resetLearnedPreferences(user.id);
+                        loadRecentlyViewed();
+                        Alert.alert("Done", "Preferences and personalization data have been reset.");
+                      } catch (e) {
+                        console.error("Reset preferences error:", e);
+                        Alert.alert("Error", "Something went wrong. Please try again.");
+                      }
+                    },
+                  },
+                ]
+              );
+            }}
+            className="flex-row items-center justify-between py-4 px-5 bg-neutral-50 rounded-2xl border border-neutral-200"
+            activeOpacity={0.7}
+          >
+            <View className="flex-row items-center gap-3">
+              <View className="items-center justify-center rounded-xl w-10 h-10 bg-neutral-200">
+                <Ionicons name="trash-outline" size={18} color={theme.colors.neutral[600]} />
+              </View>
+              <View>
+                <Text
+                  className="text-neutral-900"
+                  style={{
+                    fontFamily: typography.fontFamily.sans.semibold,
+                    fontSize: 15,
+                  }}
+                >
+                  Reset preferences & data
+                </Text>
+                <Text
+                  className="text-neutral-500"
+                  style={{
+                    fontFamily: typography.fontFamily.sans.regular,
+                    fontSize: 12,
+                  }}
+                >
+                  Clear feed cache, recently viewed, and learned preferences
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={theme.colors.neutral[400]} />
           </TouchableOpacity>
         </View>
 

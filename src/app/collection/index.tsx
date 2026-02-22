@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,19 +6,42 @@ import {
   TouchableOpacity,
   Image,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { theme } from '../../styles/theme';
 import { typography } from '../../styles/typography';
-import { COLLECTIONS, Collection } from '../../data/collections';
+import { getCollections, Collection } from '../../data/collections';
+import { getProducts } from '../../lib/productsApi';
+import { Product } from '../../types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const GAP = theme.spacing.md;
 const COLUMN_WIDTH = (SCREEN_WIDTH - theme.spacing.lg * 2 - GAP) / 2;
 
 export default function CollectionsListPage() {
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getProducts({ limit: 300 }).then((products) => {
+      setCollections(getCollections(products));
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) {
+    return (
+      <SafeAreaView edges={['top']} className="flex-1 bg-white">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-white">
       {/* Header */}
@@ -60,11 +83,11 @@ export default function CollectionsListPage() {
             color: theme.colors.neutral[500],
           }}
         >
-          {COLLECTIONS.length} collections curated by the community
+          {collections.length} collections curated by the community
         </Text>
 
         <View className="flex-row flex-wrap" style={{ gap: GAP }}>
-          {COLLECTIONS.map((collection) => (
+          {collections.map((collection) => (
             <CollectionListCard
               key={collection.id}
               collection={collection}

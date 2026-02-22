@@ -63,8 +63,10 @@ export default function HomePage() {
 
   const loadInitialFeed = async () => {
     setLoading(true);
+    if (__DEV__) console.log('[Home] loadInitialFeed started, userId:', userId ?? 'guest');
     try {
       const result = await feedService.loadFeed(userId, { limit: PAGE_SIZE, offset: 0 });
+      if (__DEV__) console.log('[Home] loadInitialFeed done:', result.products.length, 'products', result.fromCache ? '(from cache)' : '(from API)');
       setProducts(result.products);
       setFeedType(result.feedType);
       setOffset(result.products.length);
@@ -75,7 +77,7 @@ export default function HomePage() {
         silentRefresh();
       }
     } catch (e) {
-      console.error('Feed load error:', e);
+      console.error('[Home] Feed load error:', e);
     } finally {
       setLoading(false);
     }
@@ -268,6 +270,7 @@ export default function HomePage() {
           onDismiss={handleDismiss}
           showSkeleton={loading}
           skeletonCount={6}
+          emptyStateSubtext="Pull down to refresh"
         />
 
         {/* Loading more indicator */}

@@ -1,6 +1,6 @@
 import { Product } from '../types';
 import { clientStorage } from './clientStorage';
-import { STATIC_PRODUCTS } from '../data/staticProducts';
+import { getProducts } from './productsApi';
 
 /**
  * Compute an attribute-based similarity score between two products.
@@ -74,9 +74,9 @@ export const recommendationService = {
       return cached.filter((p) => !excludeIds.includes(p.id)).slice(0, limit);
     }
 
-    const allProducts = STATIC_PRODUCTS.filter(
-      (p) => p.id !== product.id && p.is_active && !excludeIds.includes(p.id)
-    );
+    const excludeSet = new Set([product.id, ...excludeIds]);
+    const allFetched = await getProducts({ limit: 150 });
+    const allProducts = allFetched.filter((p) => !excludeSet.has(p.id));
 
     const scored = allProducts
       .map((candidate) => ({
@@ -87,9 +87,7 @@ export const recommendationService = {
       .slice(0, limit)
       .map((s) => s.product);
 
-    // Cache results (before applying excludeIds for better cache reuse)
-    const allScored = STATIC_PRODUCTS
-      .filter((p) => p.id !== product.id && p.is_active)
+    const allScored = allProducts
       .map((candidate) => ({
         product: candidate,
         score: computeSimilarity(product, candidate),
