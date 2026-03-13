@@ -60,8 +60,29 @@ export default function DiscoverPage() {
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const searchInputRef = useRef<TextInput>(null);
 
+  const [loadingProducts, setLoadingProducts] = useState(true);
+
   useEffect(() => {
-    getProducts({ limit: 300 }).then(setAllProducts);
+    let cancelled = false;
+    setLoadingProducts(true);
+    // Load first batch immediately, then load more in the background
+    getProducts({ limit: 60, orderBy: ['is_featured', 'created_at'], orderAsc: [false, false] }).then((first) => {
+      if (cancelled) return;
+      setAllProducts(first);
+      setLoadingProducts(false);
+      // Load more in background for richer search/filter
+      return getProducts({ limit: 300, offset: 60 });
+    }).then((rest) => {
+      if (!cancelled && rest && rest.length > 0) {
+        setAllProducts((prev) => {
+          const seen = new Set(prev.map((p) => p.id));
+          return [...prev, ...rest.filter((p) => !seen.has(p.id))];
+        });
+      }
+    }).catch(() => {
+      if (!cancelled) setLoadingProducts(false);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   const collections = useMemo(() => getCollections(allProducts), [allProducts]);
@@ -400,6 +421,7 @@ export default function DiscoverPage() {
           collections={collections}
           onProductPress={handleProductPress}
           onCategoryPress={handleCategoryPress}
+          loading={loadingProducts}
         />
       )}
 
@@ -425,6 +447,7 @@ function DefaultDiscoverView({
   collections,
   onProductPress,
   onCategoryPress,
+  loading,
 }: {
   allProducts: Product[];
   trendingProducts: Product[];
@@ -432,6 +455,7 @@ function DefaultDiscoverView({
   collections: Collection[];
   onProductPress: (id: string) => void;
   onCategoryPress: (cat: string) => void;
+  loading?: boolean;
 }) {
   return (
     <ScrollView
@@ -481,19 +505,21 @@ function DefaultDiscoverView({
 
       {/* ── Trending Now ────────────────────────────────── */}
       <View className="mt-8">
-        <SectionHeader
-          title="Trending Now"
-        />
-        <FlatList
-          data={trendingProducts}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: theme.spacing.lg, gap: CARD_GAP }}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <TrendingProductCard product={item} onPress={() => onProductPress(item.id)} />
-          )}
-        />
+        <SectionHeader title="Trending Now" />
+        {loading ? (
+          <TrendingSkeletonRow />
+        ) : (
+          <FlatList
+            data={trendingProducts}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: theme.spacing.lg, gap: CARD_GAP }}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <TrendingProductCard product={item} onPress={() => onProductPress(item.id)} />
+            )}
+          />
+        )}
       </View>
 
       {/* ── Collections ─────────────────────────────────── */}
@@ -1483,6 +1509,39 @@ function TogglePill({
         {label}
       </Text>
     </TouchableOpacity>
+  );
+}
+
+// ─── Trending Skeleton ───────────────────────────────────────────────────────
+function TrendingSkeletonRow() {
+  const opacity = React.useRef(new Animated.Value(0.3)).current;
+
+  React.useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.7, duration: 800, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+      ])
+    );
+    anim.start();
+    return () => anim.stop();
+  }, []);
+
+  return (
+    <View style={{ flexDirection: 'row', paddingHorizontal: theme.spacing.lg, gap: CARD_GAP }}>
+      {[150, 150, 150].map((w, i) => (
+        <Animated.View
+          key={i}
+          style={{
+            width: w,
+            height: 240,
+            borderRadius: theme.borderRadius.lg,
+            backgroundColor: theme.colors.neutral[200],
+            opacity,
+          }}
+        />
+      ))}
+    </View>
   );
 }
 

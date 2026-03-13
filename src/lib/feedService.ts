@@ -5,6 +5,8 @@ import { getProducts, getProductsByIds } from './productsApi';
 import { Product, FeedType, FeedOptions, UserPreferences } from '../types';
 
 const DEFAULT_LIMIT = 20;
+const PYTHON_SERVICE_URL = process.env.EXPO_PUBLIC_PYTHON_SERVICE_URL || '';
+const FEED_TIMEOUT_MS = 10000;
 
 function applyGenderFilter(products: Product[], gender?: string | null): Product[] {
   if (!gender || gender === 'both') return products;
@@ -28,13 +30,9 @@ function paginate(products: Product[], limit: number, offset: number): Product[]
   return products.slice(offset, offset + limit);
 }
 
-/**
- * Score a product for the preference-based feed.
- */
 function scoreByPreferences(product: Product, prefs: UserPreferences): number {
   let score = 0;
 
-  // Style match
   if (prefs.style_tags && product.style) {
     for (const tag of prefs.style_tags) {
       if (product.style.some((s) => s.toLowerCase() === tag.toLowerCase())) {
@@ -43,7 +41,6 @@ function scoreByPreferences(product: Product, prefs: UserPreferences): number {
     }
   }
 
-  // Color match
   if (prefs.favorite_colors && product.colors) {
     for (const color of prefs.favorite_colors) {
       if (product.colors.some((c) => c.toLowerCase() === color.toLowerCase())) {
@@ -52,7 +49,6 @@ function scoreByPreferences(product: Product, prefs: UserPreferences): number {
     }
   }
 
-  // Pattern match
   if (prefs.pattern_preferences && product.attributes?.pattern) {
     const pattern = product.attributes.pattern.toLowerCase();
     if (prefs.pattern_preferences.some((p) => p.toLowerCase() === pattern)) {
@@ -60,15 +56,11 @@ function scoreByPreferences(product: Product, prefs: UserPreferences): number {
     }
   }
 
-  // Featured bonus
   if (product.is_featured) score += 1;
 
   return score;
 }
 
-/**
- * Enforce max 2 products per brand per page.
- */
 function applyBrandDiversityCap(products: Product[], maxPerBrand: number = 2): Product[] {
   const brandCount: Record<string, number> = {};
   return products.filter((p) => {
@@ -78,19 +70,95 @@ function applyBrandDiversityCap(products: Product[], maxPerBrand: number = 2): P
   });
 }
 
+/**
+ * Map a Python service product response to the Product type.
+ */
+function mapPythonProduct(item: any): Product {
+  return {
+    id: item.id,
+    brand_id: null,
+    title: item.title || '',
+    description: item.description || '',
+    price: Number(item.price) || 0,
+    sale_price: item.sale_price != null ? Number(item.sale_price) : null,
+    category: item.category || '',
+    subcategory: item.subcategory || null,
+    gender: (item.gender as Product['gender']) || 'unisex',
+    colors: Array.isArray(item.colors) ? item.colors : [],
+    size_range: Array.isArray(item.size_range) ? item.size_range : [],
+    fit_type: item.fit_type || undefined,
+    style: Array.isArray(item.style) ? item.style : undefined,
+    occasion: Array.isArray(item.occasion) ? item.occasion : undefined,
+    season: Array.isArray(item.season) ? item.season : undefined,
+    attributes: {
+      pattern: item.pattern || item.attributes?.pattern,
+      materials: item.materials || item.attributes?.materials,
+      sleeve_type: item.attributes?.sleeve_type,
+      neck_type: item.attributes?.neck_type,
+      length: item.attributes?.length,
+      waist_type: item.attributes?.waist_type,
+      closure_type: item.attributes?.closure_type,
+      care_instructions: item.attributes?.care_instructions,
+    },
+    image_urls: Array.isArray(item.image_urls) ? item.image_urls : [],
+    embedding: null,
+    is_active: true,
+    source_platform: item.source_platform || undefined,
+    source_brand_name: item.source_brand_name || undefined,
+    affiliate_url: item.affiliate_url || undefined,
+    is_featured: item.is_featured || undefined,
+    created_at: item.created_at || undefined,
+  };
+}
+
+/**
+ * Call the Python service /personalized-feed endpoint.
+ * Returns null if the service is unavailable.
+ */
+async function callPythonPersonalizedFeed(
+  userId: string,
+  options: FeedOptions & { gender?: string | null }
+): Promise<Product[] | null> {
+  if (!PYTHON_SERVICE_URL) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FEED_TIMEOUT_MS);
+
+    const response = await fetch(`${PYTHON_SERVICE_URL}/personalized-feed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: userId,
+        limit: options.limit ?? DEFAULT_LIMIT,
+        offset: options.offset ?? 0,
+        exclude_ids: options.excludeIds ?? [],
+        gender: options.gender ?? null,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!Array.isArray(data)) return null;
+
+    return data.map(mapPythonProduct);
+  } catch {
+    if (__DEV__) console.log('[feedService] Python service unavailable, using fallback');
+    return null;
+  }
+}
+
 export const feedService = {
-  /**
-   * Determine which feed type to use for a user.
-   */
   async determineFeedType(userId: string | null): Promise<FeedType> {
     if (!userId) return 'cold_start';
 
     try {
-      // Check for interaction history
       const hasHistory = await interactionService.hasInteractionHistory(userId);
       if (hasHistory) return 'behavioral';
 
-      // Check for quiz preferences
       const { data: prefs } = await supabase
         .from('user_preferences')
         .select('style_tags, favorite_colors')
@@ -108,9 +176,6 @@ export const feedService = {
     return 'cold_start';
   },
 
-  /**
-   * Get the user's preferences from Supabase.
-   */
   async getUserPreferences(userId: string): Promise<UserPreferences | null> {
     try {
       const { data, error } = await supabase
@@ -126,12 +191,8 @@ export const feedService = {
     }
   },
 
-  /**
-   * Get the user's gender preference for filtering.
-   */
   async getUserGender(userId: string): Promise<string | null> {
     try {
-      // Check user_preferences first
       const { data: prefs } = await supabase
         .from('user_preferences')
         .select('gender')
@@ -140,7 +201,6 @@ export const feedService = {
 
       if (prefs?.gender) return prefs.gender;
 
-      // Fall back to users table
       const { data: profile } = await supabase
         .from('users')
         .select('gender')
@@ -148,19 +208,13 @@ export const feedService = {
         .single();
 
       if (profile?.gender) {
-        const genderMap: Record<string, string> = {
-          woman: 'women',
-          man: 'men',
-        };
+        const genderMap: Record<string, string> = { woman: 'women', man: 'men' };
         return genderMap[profile.gender] || null;
       }
     } catch {}
     return null;
   },
 
-  /**
-   * Cold Start Feed: trending/featured products from DB.
-   */
   async getColdStartFeed(options: FeedOptions = {}): Promise<Product[]> {
     const { limit = DEFAULT_LIMIT, offset = 0, excludeIds = [], gender } = options;
 
@@ -177,11 +231,19 @@ export const feedService = {
     return paginate(products, limit, offset);
   },
 
-  /**
-   * Preference Feed: scored by style/color/pattern match (products from DB).
-   */
   async getPreferenceFeed(prefs: UserPreferences, options: FeedOptions = {}): Promise<Product[]> {
     const { limit = DEFAULT_LIMIT, offset = 0, excludeIds = [], gender } = options;
+
+    // Try Python service first (uses server-side scoring + CLIP)
+    if (PYTHON_SERVICE_URL) {
+      const pythonResults = await callPythonPersonalizedFeed('__prefs_only__', {
+        ...options,
+        gender: gender || prefs.gender || undefined,
+      });
+      if (pythonResults && pythonResults.length > 0) {
+        return pythonResults;
+      }
+    }
 
     const fetched = await getProducts({
       limit: 200,
@@ -202,9 +264,6 @@ export const feedService = {
     return paginate(result, limit, offset);
   },
 
-  /**
-   * Behavioral Feed: 70% interaction-based + 30% preference-based.
-   */
   async getBehavioralFeed(
     userId: string,
     prefs: UserPreferences | null,
@@ -212,9 +271,24 @@ export const feedService = {
   ): Promise<Product[]> {
     const { limit = DEFAULT_LIMIT, offset = 0, excludeIds = [], gender } = options;
 
+    // Try Python service first (uses CLIP embeddings for anchor similarity)
+    const pythonResults = await callPythonPersonalizedFeed(userId, {
+      limit,
+      offset,
+      excludeIds,
+      gender: gender || prefs?.gender || undefined,
+    });
+
+    if (pythonResults && pythonResults.length > 0) {
+      if (__DEV__) console.log('[feedService] Using Python behavioral feed:', pythonResults.length, 'items');
+      return pythonResults;
+    }
+
+    // Local fallback
+    if (__DEV__) console.log('[feedService] Falling back to local behavioral scoring');
+
     const interactionScores = await interactionService.getInteractionScores(userId);
 
-    // Find anchor products (top interacted)
     const anchorIds = Object.entries(interactionScores)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
@@ -229,11 +303,7 @@ export const feedService = {
       excludeIds,
     });
 
-    let products = fetched;
-
-    // Score each candidate
-    const scored = products.map((candidate) => {
-      // Behavioral score: similarity to anchor products
+    const scored = fetched.map((candidate) => {
       let behavioralScore = 0;
       for (const anchor of anchors) {
         if (anchor.id === candidate.id) continue;
@@ -257,15 +327,12 @@ export const feedService = {
         behavioralScore += sim * anchorWeight;
       }
 
-      // Preference score
       let prefScore = 0;
       if (prefs) {
         prefScore = scoreByPreferences(candidate, prefs);
       }
 
-      // Blend: 70% behavioral + 30% preference
       const totalScore = 0.7 * behavioralScore + 0.3 * prefScore + Math.random() * 0.3;
-
       return { product: candidate, score: totalScore };
     });
 
@@ -276,9 +343,6 @@ export const feedService = {
     return paginate(result, limit, offset);
   },
 
-  /**
-   * Main entry point: load the feed with caching and tier decision.
-   */
   async loadFeed(
     userId: string | null,
     options: FeedOptions & { forceRefresh?: boolean } = {}
@@ -286,30 +350,19 @@ export const feedService = {
     const { forceRefresh = false, ...feedOptions } = options;
     const effectiveUserId = userId || 'guest';
 
-    // Check cache (only for first page); skip cache if it's empty so we always refetch
+    // Serve from cache on first page
     if (!forceRefresh && (feedOptions.offset || 0) === 0) {
       const cache = await clientStorage.getFeedCache(effectiveUserId);
       if (cache && cache.data.length > 0) {
-        if (__DEV__) {
-          console.log('[Feed] Serving from cache:', cache.data.length, 'products');
-        }
+        if (__DEV__) console.log('[Feed] Serving from cache:', cache.data.length, 'products');
         return { products: cache.data, feedType: cache.feed_type, fromCache: true };
-      }
-      if (cache && cache.data.length === 0 && __DEV__) {
-        console.log('[Feed] Ignoring empty cache, fetching from API');
       }
     }
 
-    // Get seen product IDs for exclusion
-    const seenIds = userId
-      ? await clientStorage.getSeenProductIds(userId)
-      : [];
+    const seenIds = userId ? await clientStorage.getSeenProductIds(userId) : [];
     const allExcludeIds = [...(feedOptions.excludeIds || []), ...seenIds];
 
-    // Get gender preference
-    const gender = userId
-      ? await this.getUserGender(userId)
-      : null;
+    const gender = userId ? await this.getUserGender(userId) : null;
 
     const mergedOptions: FeedOptions = {
       ...feedOptions,
@@ -317,11 +370,8 @@ export const feedService = {
       gender: feedOptions.gender || gender,
     };
 
-    // Determine feed type
     const feedType = await this.determineFeedType(userId);
-    if (__DEV__) {
-      console.log('[Feed] Loading feed from API, type:', feedType);
-    }
+    if (__DEV__) console.log('[Feed] Loading feed from API, type:', feedType);
 
     let products: Product[];
 
@@ -344,14 +394,12 @@ export const feedService = {
         products = await this.getColdStartFeed(mergedOptions);
     }
 
-    // Cache first page
+    // Cache first page only
     if ((feedOptions.offset || 0) === 0) {
       await clientStorage.setFeedCache(effectiveUserId, products, feedType);
     }
 
-    if (__DEV__) {
-      console.log('[Feed] API returned', products.length, 'products');
-    }
+    if (__DEV__) console.log('[Feed] API returned', products.length, 'products');
     return { products, feedType, fromCache: false };
   },
 };

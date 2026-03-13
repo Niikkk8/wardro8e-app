@@ -75,10 +75,11 @@ export const storage = {
   },
 
   // Clear all storage (logout)
+  // ONBOARDING_COMPLETED is intentionally preserved — it represents the app's
+  // intro walkthrough which only needs to be shown once per device, not per user.
   async clearAll(userId?: string): Promise<void> {
     try {
       await AsyncStorage.multiRemove([
-        STORAGE_KEYS.ONBOARDING_COMPLETED,
         STORAGE_KEYS.PROFILE_ONBOARDING_COMPLETED,
         STORAGE_KEYS.STYLE_QUIZ_COMPLETED,
         STORAGE_KEYS.USER_TOKEN,

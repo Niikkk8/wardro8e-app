@@ -5,7 +5,6 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Alert,
   AppState,
   AppStateStatus,
 } from 'react-native';
@@ -32,17 +31,25 @@ export default function HomePage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
+
+  // Use refs to avoid stale closures in callbacks
   const lastBackgroundTime = useRef<number>(Date.now());
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const productsRef = useRef<Product[]>([]);
 
   const userId = user?.id || null;
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
 
   // Initial load
   useEffect(() => {
     loadInitialFeed();
   }, [userId]);
 
-  // App state listener: refresh when returning from background after 5+ min
+  // Refresh when returning from background after 5+ min
   useEffect(() => {
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription.remove();
@@ -72,7 +79,6 @@ export default function HomePage() {
       setOffset(result.products.length);
       setHasMore(result.products.length >= PAGE_SIZE);
 
-      // If served from cache, do a silent background refresh
       if (result.fromCache) {
         silentRefresh();
       }
@@ -83,32 +89,30 @@ export default function HomePage() {
     }
   };
 
-  const silentRefresh = async () => {
+  // Use ref to compare against current products without stale closure
+  const silentRefresh = useCallback(async () => {
     try {
       const result = await feedService.loadFeed(userId, {
         limit: PAGE_SIZE,
         offset: 0,
         forceRefresh: true,
       });
-      // Only update if data actually differs
-      if (JSON.stringify(result.products.map((p) => p.id)) !==
-          JSON.stringify(products.map((p) => p.id))) {
+      // Compare against the ref (always current) to avoid stale closure
+      const currentIds = productsRef.current.map((p) => p.id).join(',');
+      const newIds = result.products.map((p) => p.id).join(',');
+      if (newIds !== currentIds) {
         setProducts(result.products);
         setFeedType(result.feedType);
         setOffset(result.products.length);
         setHasMore(result.products.length >= PAGE_SIZE);
       }
     } catch {}
-  };
+  }, [userId]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      if (userId) {
-        await clientStorage.clearFeedCache(userId);
-      } else {
-        await clientStorage.clearFeedCache('guest');
-      }
+      await clientStorage.clearFeedCache(userId || 'guest');
       const result = await feedService.loadFeed(userId, {
         limit: PAGE_SIZE,
         offset: 0,
@@ -129,16 +133,16 @@ export default function HomePage() {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {
+      const currentProducts = productsRef.current;
       const result = await feedService.loadFeed(userId, {
         limit: PAGE_SIZE,
-        offset,
+        offset: currentProducts.length,
         forceRefresh: true,
       });
       if (result.products.length === 0) {
         setHasMore(false);
       } else {
-        // Dedup against existing products
-        const existingIds = new Set(products.map((p) => p.id));
+        const existingIds = new Set(currentProducts.map((p) => p.id));
         const newProducts = result.products.filter((p) => !existingIds.has(p.id));
         setProducts((prev) => [...prev, ...newProducts]);
         setOffset((prev) => prev + newProducts.length);
@@ -149,7 +153,7 @@ export default function HomePage() {
     } finally {
       setLoadingMore(false);
     }
-  }, [userId, offset, loadingMore, hasMore, products]);
+  }, [userId, loadingMore, hasMore]);
 
   const handleScroll = useCallback(
     (event: any) => {
@@ -167,10 +171,7 @@ export default function HomePage() {
   }, []);
 
   const handleDismiss = useCallback(async (productId: string) => {
-    // Optimistic UI: remove immediately
     setProducts((prev) => prev.filter((p) => p.id !== productId));
-
-    // Log dismiss interaction
     if (userId) {
       await interactionService.logInteraction(userId, productId, 'dismiss');
       await clientStorage.addSeenProductId(userId, productId);
@@ -273,14 +274,12 @@ export default function HomePage() {
           emptyStateSubtext="Pull down to refresh"
         />
 
-        {/* Loading more indicator */}
         {loadingMore && (
           <View className="py-6 items-center">
             <MasonryLayout showSkeleton skeletonCount={2} />
           </View>
         )}
 
-        {/* End of feed */}
         {!hasMore && products.length > 0 && !loading && (
           <View className="py-8 items-center">
             <Text

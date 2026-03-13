@@ -20,7 +20,7 @@ import { theme } from '../../styles/theme';
 import { typography } from '../../styles/typography';
 import { Product } from '../../types';
 import { getCollections, Collection } from '../../data/collections';
-import { getProducts } from '../../lib/productsApi';
+import { getProducts, getProductsByIds } from '../../lib/productsApi';
 import { useWardrobe, UserCollection } from '../../contexts/WardrobeContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -31,29 +31,53 @@ type Tab = 'favourites' | 'collections';
 
 export default function WardrobePage() {
   const wardrobe = useWardrobe();
+  // favouriteProducts: fetched by ID — no need to load the full catalog
+  const [favouriteProducts, setFavouriteProducts] = useState<Product[]>([]);
+  const [loadingFavourites, setLoadingFavourites] = useState(true);
+  // allProducts: catalog used by the Collections tab — loaded lazily on first switch
   const [allProducts, setAllProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingCollections, setLoadingCollections] = useState(false);
+  const [collectionsCatalogLoaded, setCollectionsCatalogLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('favourites');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
 
+  // Load only the user's saved products on mount
   useEffect(() => {
-    getProducts({ limit: 300 }).then((products) => {
-      setAllProducts(products);
-      setLoading(false);
-    });
-  }, []);
+    if (wardrobe.loading) return;
+    setLoadingFavourites(true);
+    if (wardrobe.favouriteIds.length === 0) {
+      setFavouriteProducts([]);
+      setLoadingFavourites(false);
+      return;
+    }
+    getProductsByIds(wardrobe.favouriteIds)
+      .then((products) => {
+        // Preserve the user's saved order
+        const byId = new Map(products.map((p) => [p.id, p]));
+        setFavouriteProducts(
+          wardrobe.favouriteIds
+            .map((id) => byId.get(id))
+            .filter(Boolean) as Product[]
+        );
+      })
+      .finally(() => setLoadingFavourites(false));
+  }, [wardrobe.loading, wardrobe.favouriteIds.join(',')]);
+
+  // Lazy-load the product catalog when the collections tab is first opened
+  useEffect(() => {
+    if (activeTab !== 'collections' || collectionsCatalogLoaded || loadingCollections) return;
+    setLoadingCollections(true);
+    getProducts({ limit: 150, orderBy: ['is_featured', 'created_at'], orderAsc: [false, false] })
+      .then((products) => {
+        setAllProducts(products);
+        setCollectionsCatalogLoaded(true);
+      })
+      .finally(() => setLoadingCollections(false));
+  }, [activeTab, collectionsCatalogLoaded, loadingCollections]);
 
   const collections = useMemo(() => getCollections(allProducts), [allProducts]);
-
-  const favouriteProducts = useMemo(
-    () =>
-      wardrobe.favouriteIds
-        .map((id) => allProducts.find((p) => p.id === id))
-        .filter(Boolean) as Product[],
-    [wardrobe.favouriteIds, allProducts]
-  );
 
   const savedCommunityCollections = useMemo(
     () =>
@@ -90,15 +114,7 @@ export default function WardrobePage() {
     [wardrobe]
   );
 
-  if (loading) {
-    return (
-      <SafeAreaView edges={['top']} className="flex-1 bg-white">
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
-        </View>
-      </SafeAreaView>
-    );
-  }
+  // No full-page blocking loader — each tab renders its own loading state
 
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-white">
@@ -161,11 +177,21 @@ export default function WardrobePage() {
 
       {/* Content */}
       {activeTab === 'favourites' ? (
-        <FavouritesTab
-          products={favouriteProducts}
-          onProductPress={(id) => router.push(`/product/${id}`)}
-          onRemove={(id) => wardrobe.toggleFavourite(id)}
-        />
+        loadingFavourites ? (
+          <View className="flex-1 items-center justify-center">
+            <ActivityIndicator size="large" color={theme.colors.primary[500]} />
+          </View>
+        ) : (
+          <FavouritesTab
+            products={favouriteProducts}
+            onProductPress={(id) => router.push(`/product/${id}`)}
+            onRemove={(id) => wardrobe.toggleFavourite(id)}
+          />
+        )
+      ) : loadingCollections ? (
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
+        </View>
       ) : (
         <CollectionsTab
           allProducts={allProducts}

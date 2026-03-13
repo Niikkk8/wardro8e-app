@@ -12,7 +12,9 @@ import {
   Modal,
   TextInput,
   Platform,
-  KeyboardAvoidingView,
+  PanResponder,
+  ActionSheetIOS,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -28,6 +30,9 @@ import { interactionService } from "../../lib/interactionService";
 import { preferenceService } from "../../lib/preferenceService";
 import { recommendationService } from "../../lib/recommendationService";
 import { clientStorage } from "../../lib/clientStorage";
+
+let Haptics: typeof import("expo-haptics") | null = null;
+try { Haptics = require("expo-haptics"); } catch {}
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -57,13 +62,47 @@ export default function ProductDetailPage() {
   const detailsHeight = useRef(new Animated.Value(0)).current;
   const detailsOpacity = useRef(new Animated.Value(0)).current;
 
+  // Image swipe pan responder
+  const imageSwipeDx = useRef(0);
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dy) < 30;
+      },
+      onPanResponderGrant: () => { imageSwipeDx.current = 0; },
+      onPanResponderMove: (_, gestureState) => {
+        imageSwipeDx.current = gestureState.dx;
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx < -50) {
+          setCurrentImageIndex((prev) => {
+            const product = productRef.current;
+            if (!product) return prev;
+            return Math.min(prev + 1, product.image_urls.length - 1);
+          });
+        } else if (gestureState.dx > 50) {
+          setCurrentImageIndex((prev) => Math.max(prev - 1, 0));
+        }
+      },
+    })
+  ).current;
+
+  const productRef = useRef<Product | null>(null);
+
+  useEffect(() => {
+    productRef.current = product;
+  }, [product]);
+
   useEffect(() => {
     if (id) {
       openTime.current = Date.now();
       viewLogged.current = false;
       scrollDepthReached.current = false;
-      fetchProduct();
-      logViewAndFetchSimilar();
+      setCurrentImageIndex(0);
+      setSimilarProducts([]);
+      setLoadingSimilar(true);
+      loadProductAndSimilar(id);
     }
   }, [id]);
 
@@ -74,87 +113,60 @@ export default function ProductDetailPage() {
   useEffect(() => {
     if (product) {
       Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.spring(slideAnim, {
-          toValue: 0,
-          tension: 80,
-          friction: 12,
-          useNativeDriver: true,
-        }),
+        Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.spring(slideAnim, { toValue: 0, tension: 80, friction: 12, useNativeDriver: true }),
       ]).start();
     }
   }, [product]);
 
   useEffect(() => {
     Animated.parallel([
-      Animated.spring(detailsHeight, {
-        toValue: showDetails ? 1 : 0,
-        tension: 100,
-        friction: 12,
-        useNativeDriver: false,
-      }),
-      Animated.timing(detailsOpacity, {
-        toValue: showDetails ? 1 : 0,
-        duration: 200,
-        useNativeDriver: false,
-      }),
+      Animated.spring(detailsHeight, { toValue: showDetails ? 1 : 0, tension: 100, friction: 12, useNativeDriver: false }),
+      Animated.timing(detailsOpacity, { toValue: showDetails ? 1 : 0, duration: 200, useNativeDriver: false }),
     ]).start();
   }, [showDetails]);
 
-  const fetchProduct = async () => {
-    try {
-      setLoading(true);
+  /**
+   * Single entry point: fetch product + log view + fetch similar, all coordinated.
+   * This avoids the old pattern of calling getProductById 3 separate times.
+   */
+  const loadProductAndSimilar = async (productId: string) => {
+    setLoading(true);
 
-      // Check local cache first
-      if (id) {
-        const cached = await clientStorage.getCachedProduct(id);
-        if (cached) {
-          setProduct(cached);
-          setLoading(false);
-          return;
-        }
-      }
+    // 1. Try cache first
+    const cached = await clientStorage.getCachedProduct(productId);
+    let resolvedProduct: Product | null = cached;
 
-      const foundProduct = id ? await getProductById(id) : null;
-      if (foundProduct) {
-        setProduct(foundProduct);
-        await clientStorage.setCachedProduct(foundProduct);
-      }
-    } catch (error) {
-      console.error("Error fetching product:", error);
-    } finally {
+    if (resolvedProduct) {
+      setProduct(resolvedProduct);
       setLoading(false);
     }
-  };
 
-  const logViewAndFetchSimilar = async () => {
-    if (!id) return;
+    // 2. Fetch from DB (always, to ensure freshness; but only update UI if not cached)
+    const fetched = await getProductById(productId);
+    if (fetched) {
+      resolvedProduct = fetched;
+      setProduct(fetched);
+      clientStorage.setCachedProduct(fetched).catch(() => {});
+    }
+    setLoading(false);
 
-    // A: Log view interaction (fire-and-forget)
+    if (!resolvedProduct) return;
+
+    // 3. Log view (fire-and-forget, deduped)
     if (userId && !viewLogged.current) {
       viewLogged.current = true;
-      const logged = await interactionService.logInteraction(userId, id, 'view');
+      const logged = await interactionService.logInteraction(userId, productId, 'view');
       if (logged) {
-        const prod = id ? await getProductById(id) : null;
-        if (prod) {
-          preferenceService.handleInteraction(userId, prod, 'view').catch(() => {});
-        }
+        preferenceService.handleInteraction(userId, resolvedProduct, 'view').catch(() => {});
       }
     }
 
-    // C: Fetch similar products
-    setLoadingSimilar(true);
+    // 4. Fetch similar products (uses cache or Python service)
+    const seenIds = userId ? await clientStorage.getSeenProductIds(userId) : [];
     try {
-      const prod = id ? await getProductById(id) : null;
-      if (prod) {
-        const seenIds = userId ? await clientStorage.getSeenProductIds(userId) : [];
-        const similar = await recommendationService.getSimilarProducts(prod, 12, seenIds);
-        setSimilarProducts(similar);
-      }
+      const similar = await recommendationService.getSimilarProducts(resolvedProduct, 12, seenIds);
+      setSimilarProducts(similar);
     } catch (e) {
       console.error("Error fetching similar products:", e);
     } finally {
@@ -163,52 +175,48 @@ export default function ProductDetailPage() {
   };
 
   const handleScrollDepth = useCallback((event: any) => {
-    if (scrollDepthReached.current || !product || !userId) return;
+    if (scrollDepthReached.current || !productRef.current || !userId) return;
     const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
     const scrollPercent = (contentOffset.y + layoutMeasurement.height) / contentSize.height;
     const timeOnScreen = Date.now() - openTime.current;
 
     if (scrollPercent > 0.5 && timeOnScreen > 3000) {
       scrollDepthReached.current = true;
-      // Update implicit style counters (stronger signal than just view)
-      preferenceService.updateStyleCounters(userId, product, 'view').catch(() => {});
+      preferenceService.updateStyleCounters(userId, productRef.current, 'view').catch(() => {});
     }
-  }, [product, userId]);
+  }, [userId]);
 
   const handleLike = useCallback(() => {
     if (!id) return;
     wardrobe.toggleFavourite(id);
-
-    if (userId && product && !isLiked) {
+    Haptics?.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    if (userId && productRef.current && !isLiked) {
       interactionService.logInteraction(userId, id, 'like').catch(() => {});
-      preferenceService.handleInteraction(userId, product, 'like').catch(() => {});
+      preferenceService.handleInteraction(userId, productRef.current, 'like').catch(() => {});
     }
-  }, [id, userId, product, isLiked, wardrobe]);
+  }, [id, userId, isLiked, wardrobe]);
 
   const handleSave = useCallback((collectionId: string) => {
     if (!id) return;
-
     const isIn = wardrobe.isInCollection(collectionId, id);
     if (isIn) {
       wardrobe.removeFromCollection(collectionId, id);
     } else {
       wardrobe.addToCollection(collectionId, id);
-      if (userId && product) {
+      if (userId && productRef.current) {
         interactionService.logInteraction(userId, id, 'save').catch(() => {});
-        preferenceService.handleInteraction(userId, product, 'save').catch(() => {});
+        preferenceService.handleInteraction(userId, productRef.current, 'save').catch(() => {});
       }
     }
-  }, [id, userId, product, wardrobe]);
+  }, [id, userId, wardrobe]);
 
   const handleBuyNow = async () => {
     if (!product?.affiliate_url) return;
     try {
-      // Log purchase intent
       if (userId && id) {
         interactionService.logInteraction(userId, id, 'purchase').catch(() => {});
         preferenceService.handleInteraction(userId, product, 'purchase').catch(() => {});
       }
-
       const supported = await Linking.canOpenURL(product.affiliate_url);
       if (supported) {
         await Linking.openURL(product.affiliate_url);
@@ -220,12 +228,9 @@ export default function ProductDetailPage() {
 
   const handleProductPress = (productId: string) => {
     router.replace(`/product/${productId}`);
-    setCurrentImageIndex(0);
-    setSimilarProducts([]);
-    setLoadingSimilar(true);
   };
 
-  if (loading) {
+  if (loading && !product) {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-white">
         <View className="flex-1 items-center justify-center">
@@ -239,19 +244,11 @@ export default function ProductDetailPage() {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-white">
         <View className="flex-1 items-center justify-center px-6">
-          <Text
-            className="text-neutral-600 text-center"
-            style={typography.styles.body}
-          >
+          <Text className="text-neutral-600 text-center" style={typography.styles.body}>
             Product not found
           </Text>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            className="mt-4 bg-primary-500 rounded-xl px-6 py-3"
-          >
-            <Text className="text-white" style={typography.styles.button}>
-              Go Back
-            </Text>
+          <TouchableOpacity onPress={() => router.back()} className="mt-4 bg-primary-500 rounded-xl px-6 py-3">
+            <Text className="text-white" style={typography.styles.button}>Go Back</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -262,10 +259,9 @@ export default function ProductDetailPage() {
   const currentImage = images[currentImageIndex] || images[0];
   const colors = product.colors || [];
   const sizeRange = product.size_range || [];
-  const displayPrice =
-    product.sale_price && product.sale_price < product.price
-      ? product.sale_price
-      : product.price;
+  const displayPrice = product.sale_price && product.sale_price < product.price
+    ? product.sale_price
+    : product.price;
   const hasDiscount = product.sale_price && product.sale_price < product.price;
   const discountPercent = hasDiscount
     ? Math.round(((product.price - product.sale_price!) / product.price) * 100)
@@ -275,7 +271,13 @@ export default function ProductDetailPage() {
     colors.length > 0 ||
     (product.attributes?.materials && product.attributes.materials.length > 0) ||
     (product.style && product.style.length > 0) ||
-    (product.occasion && product.occasion.length > 0);
+    (product.occasion && product.occasion.length > 0) ||
+    product.attributes?.sleeve_type ||
+    product.attributes?.neck_type ||
+    product.attributes?.length ||
+    product.attributes?.waist_type ||
+    product.attributes?.closure_type ||
+    (product.attributes?.care_instructions && product.attributes.care_instructions.length > 0);
 
   const showMoreLikeThis = !loadingSimilar && similarProducts.length >= 3;
 
@@ -284,10 +286,7 @@ export default function ProductDetailPage() {
       {/* Header */}
       <View
         className="flex-row items-center justify-between px-4 py-3 border-b"
-        style={{
-          borderBottomColor: theme.colors.neutral[200],
-          backgroundColor: "#FFFFFF",
-        }}
+        style={{ borderBottomColor: theme.colors.neutral[200], backgroundColor: "#FFFFFF" }}
       >
         <View className="flex-row items-center gap-3">
           <TouchableOpacity
@@ -295,36 +294,19 @@ export default function ProductDetailPage() {
             className="w-10 h-10 items-center justify-center -ml-2"
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons
-              name="arrow-back"
-              size={24}
-              color={theme.colors.neutral[900]}
-            />
+            <Ionicons name="arrow-back" size={24} color={theme.colors.neutral[900]} />
           </TouchableOpacity>
-          <Text
-            style={{
-              ...typography.styles.logo,
-              color: theme.colors.primary[500],
-            }}
-          >
+          <Text style={{ ...typography.styles.logo, color: theme.colors.primary[500] }}>
             Wardro8e
           </Text>
         </View>
 
         <View className="flex-row items-center gap-4">
           <TouchableOpacity className="p-2" activeOpacity={0.7}>
-            <Ionicons
-              name="notifications-outline"
-              size={24}
-              color={theme.colors.neutral[700]}
-            />
+            <Ionicons name="notifications-outline" size={24} color={theme.colors.neutral[700]} />
           </TouchableOpacity>
           <TouchableOpacity className="p-2" activeOpacity={0.7}>
-            <Ionicons
-              name="bag-outline"
-              size={24}
-              color={theme.colors.neutral[700]}
-            />
+            <Ionicons name="bag-outline" size={24} color={theme.colors.neutral[700]} />
           </TouchableOpacity>
         </View>
       </View>
@@ -336,11 +318,12 @@ export default function ProductDetailPage() {
         onScroll={handleScrollDepth}
         scrollEventThrottle={500}
       >
-        {/* Product Image */}
+        {/* Product Image with swipe */}
         {currentImage && !imageError ? (
           <View
             className="relative bg-neutral-100"
             style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH * 1.2 }}
+            {...panResponder.panHandlers}
           >
             <Image
               source={{ uri: currentImage }}
@@ -348,14 +331,12 @@ export default function ProductDetailPage() {
               onError={() => setImageError(true)}
             />
 
+            {/* Action buttons */}
             <View className="absolute top-4 right-4 gap-3">
               <TouchableOpacity
                 onPress={handleLike}
                 className="w-10 h-10 rounded-full items-center justify-center"
-                style={{
-                  backgroundColor: "rgba(255, 255, 255, 0.92)",
-                  ...theme.shadows.sm,
-                }}
+                style={{ backgroundColor: "rgba(255, 255, 255, 0.92)", ...theme.shadows.sm }}
                 activeOpacity={0.8}
               >
                 <Ionicons
@@ -367,37 +348,26 @@ export default function ProductDetailPage() {
               <TouchableOpacity
                 onPress={() => setShowSaveModal(true)}
                 className="w-10 h-10 rounded-full items-center justify-center"
-                style={{
-                  backgroundColor: "rgba(255, 255, 255, 0.92)",
-                  ...theme.shadows.sm,
-                }}
+                style={{ backgroundColor: "rgba(255, 255, 255, 0.92)", ...theme.shadows.sm }}
                 activeOpacity={0.8}
               >
-                <Ionicons
-                  name="bookmark-outline"
-                  size={18}
-                  color={theme.colors.neutral[600]}
-                />
+                <Ionicons name="bookmark-outline" size={18} color={theme.colors.neutral[600]} />
               </TouchableOpacity>
             </View>
 
+            {/* Discount badge */}
             {hasDiscount && (
               <View
                 className="absolute top-4 left-4 px-3 py-1.5 rounded-full"
                 style={{ backgroundColor: theme.colors.error }}
               >
-                <Text
-                  className="text-white"
-                  style={{
-                    fontFamily: typography.fontFamily.sans.bold,
-                    fontSize: 11,
-                  }}
-                >
+                <Text className="text-white" style={{ fontFamily: typography.fontFamily.sans.bold, fontSize: 11 }}>
                   {discountPercent}% OFF
                 </Text>
               </View>
             )}
 
+            {/* Image dots */}
             {images.length > 1 && (
               <View className="absolute bottom-4 left-0 right-0 flex-row justify-center gap-1.5">
                 {images.map((_, index) => (
@@ -407,35 +377,11 @@ export default function ProductDetailPage() {
                     className="h-2 rounded-full"
                     style={{
                       width: index === currentImageIndex ? 16 : 8,
-                      backgroundColor:
-                        index === currentImageIndex
-                          ? "#FFFFFF"
-                          : "rgba(255,255,255,0.5)",
+                      backgroundColor: index === currentImageIndex ? "#FFFFFF" : "rgba(255,255,255,0.5)",
                     }}
                   />
                 ))}
               </View>
-            )}
-
-            {images.length > 1 && (
-              <>
-                <TouchableOpacity
-                  onPress={() =>
-                    currentImageIndex > 0 &&
-                    setCurrentImageIndex(currentImageIndex - 1)
-                  }
-                  className="absolute left-0 top-0 bottom-0 w-1/3"
-                  activeOpacity={1}
-                />
-                <TouchableOpacity
-                  onPress={() =>
-                    currentImageIndex < images.length - 1 &&
-                    setCurrentImageIndex(currentImageIndex + 1)
-                  }
-                  className="absolute right-0 top-0 bottom-0 w-1/3"
-                  activeOpacity={1}
-                />
-              </>
             )}
           </View>
         ) : (
@@ -443,21 +389,14 @@ export default function ProductDetailPage() {
             className="items-center justify-center bg-neutral-100"
             style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH * 1.2 }}
           >
-            <Ionicons
-              name="image-outline"
-              size={48}
-              color={theme.colors.neutral[300]}
-            />
+            <Ionicons name="image-outline" size={48} color={theme.colors.neutral[300]} />
           </View>
         )}
 
         {/* Product Info */}
         <Animated.View
           className="bg-white px-5 pt-5"
-          style={{
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
-          }}
+          style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
         >
           {product.source_brand_name && (
             <Text
@@ -475,86 +414,69 @@ export default function ProductDetailPage() {
 
           <Text
             className="text-neutral-900 mb-3"
-            style={{
-              fontFamily: typography.fontFamily.serif.medium,
-              fontSize: 22,
-              lineHeight: 28,
-            }}
+            style={{ fontFamily: typography.fontFamily.serif.medium, fontSize: 22, lineHeight: 28 }}
           >
             {product.title}
           </Text>
 
+          {/* Price */}
           <View className="flex-row items-center gap-3 mb-5">
-            <Text
-              className="text-neutral-900"
-              style={{
-                fontFamily: typography.fontFamily.sans.bold,
-                fontSize: 24,
-              }}
-            >
+            <Text className="text-neutral-900" style={{ fontFamily: typography.fontFamily.sans.bold, fontSize: 24 }}>
               ₹{displayPrice.toLocaleString("en-IN")}
             </Text>
             {hasDiscount && (
-              <Text
-                className="text-neutral-400 line-through"
-                style={{
-                  fontFamily: typography.fontFamily.sans.regular,
-                  fontSize: 16,
-                }}
-              >
-                ₹{product.price.toLocaleString("en-IN")}
-              </Text>
+              <>
+                <Text
+                  className="text-neutral-400 line-through"
+                  style={{ fontFamily: typography.fontFamily.sans.regular, fontSize: 16 }}
+                >
+                  ₹{product.price.toLocaleString("en-IN")}
+                </Text>
+                <View className="px-2 py-0.5 rounded-full" style={{ backgroundColor: '#FEE2E2' }}>
+                  <Text style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 12, color: theme.colors.error }}>
+                    Save ₹{(product.price - displayPrice).toLocaleString("en-IN")}
+                  </Text>
+                </View>
+              </>
             )}
           </View>
 
+          {/* Size & Fit badges */}
           <View className="flex-row flex-wrap gap-2 mb-5">
             {sizeRange.length > 0 && (
-              <View
-                className="px-3 py-2 rounded-lg border"
-                style={{ borderColor: theme.colors.neutral[200] }}
-              >
-                <Text
-                  className="text-neutral-700"
-                  style={{
-                    fontFamily: typography.fontFamily.sans.medium,
-                    fontSize: 12,
-                  }}
-                >
+              <View className="px-3 py-2 rounded-lg border" style={{ borderColor: theme.colors.neutral[200] }}>
+                <Text className="text-neutral-700" style={{ fontFamily: typography.fontFamily.sans.medium, fontSize: 12 }}>
                   {sizeRange.join(" · ")}
                 </Text>
               </View>
             )}
             {product.fit_type && (
-              <View
-                className="px-3 py-2 rounded-lg border"
-                style={{ borderColor: theme.colors.neutral[200] }}
-              >
-                <Text
-                  className="text-neutral-700"
-                  style={{
-                    fontFamily: typography.fontFamily.sans.medium,
-                    fontSize: 12,
-                  }}
-                >
+              <View className="px-3 py-2 rounded-lg border" style={{ borderColor: theme.colors.neutral[200] }}>
+                <Text className="text-neutral-700" style={{ fontFamily: typography.fontFamily.sans.medium, fontSize: 12 }}>
                   {product.fit_type}
+                </Text>
+              </View>
+            )}
+            {product.occasion && product.occasion.length > 0 && (
+              <View className="px-3 py-2 rounded-lg" style={{ backgroundColor: theme.colors.primary[50] }}>
+                <Text style={{ fontFamily: typography.fontFamily.sans.medium, fontSize: 12, color: theme.colors.primary[600] }}>
+                  {product.occasion.join(", ")}
                 </Text>
               </View>
             )}
           </View>
 
+          {/* Description */}
           {product.description && (
             <Text
               className="text-neutral-600 mb-5"
-              style={{
-                fontFamily: typography.fontFamily.sans.regular,
-                fontSize: 14,
-                lineHeight: 22,
-              }}
+              style={{ fontFamily: typography.fontFamily.sans.regular, fontSize: 14, lineHeight: 22 }}
             >
               {product.description}
             </Text>
           )}
 
+          {/* Collapsible Product Details */}
           {hasDetails && (
             <View className="mb-5">
               <TouchableOpacity
@@ -563,134 +485,61 @@ export default function ProductDetailPage() {
                 style={{ borderTopColor: theme.colors.neutral[200] }}
                 activeOpacity={0.7}
               >
-                <Text
-                  className="text-neutral-900"
-                  style={{
-                    fontFamily: typography.fontFamily.sans.semibold,
-                    fontSize: 15,
-                  }}
-                >
+                <Text className="text-neutral-900" style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 15 }}>
                   Product Details
                 </Text>
                 <Animated.View
                   style={{
-                    transform: [
-                      {
-                        rotate: detailsHeight.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: ["0deg", "180deg"],
-                        }),
-                      },
-                    ],
+                    transform: [{
+                      rotate: detailsHeight.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] }),
+                    }],
                   }}
                 >
-                  <Ionicons
-                    name="chevron-down"
-                    size={20}
-                    color={theme.colors.neutral[500]}
-                  />
+                  <Ionicons name="chevron-down" size={20} color={theme.colors.neutral[500]} />
                 </Animated.View>
               </TouchableOpacity>
 
               <Animated.View
                 style={{
-                  maxHeight: detailsHeight.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0, 300],
-                  }),
+                  maxHeight: detailsHeight.interpolate({ inputRange: [0, 1], outputRange: [0, 400] }),
                   opacity: detailsOpacity,
                   overflow: "hidden",
                 }}
               >
                 <View className="pb-4 gap-4">
-                  {colors.length > 0 && (
-                    <View>
-                      <Text
-                        className="text-neutral-900 mb-1 font-medium"
-                        style={{
-                          fontFamily: typography.fontFamily.sans.medium,
-                          fontSize: 12,
-                        }}
-                      >
-                        Colors
-                      </Text>
-                      <Text
-                        className="text-neutral-800"
-                        style={{
-                          fontFamily: typography.fontFamily.sans.regular,
-                          fontSize: 14,
-                        }}
-                      >
-                        {colors.join(", ")}
-                      </Text>
-                    </View>
+                  {colors.length > 0 && <DetailRow label="Colors" value={colors.join(", ")} />}
+                  {product.attributes?.materials && product.attributes.materials.length > 0 && (
+                    <DetailRow label="Materials" value={product.attributes.materials.join(", ")} />
                   )}
-                  {product.attributes?.materials &&
-                    product.attributes.materials.length > 0 && (
-                      <View>
-                        <Text
-                          className="text-neutral-900 mb-1 font-medium"
-                          style={{
-                            fontFamily: typography.fontFamily.sans.medium,
-                            fontSize: 12,
-                          }}
-                        >
-                          Materials
-                        </Text>
-                        <Text
-                          className="text-neutral-800"
-                          style={{
-                            fontFamily: typography.fontFamily.sans.regular,
-                            fontSize: 14,
-                          }}
-                        >
-                          {product.attributes.materials.join(", ")}
-                        </Text>
-                      </View>
-                    )}
                   {product.style && product.style.length > 0 && (
-                    <View>
-                      <Text
-                        className="text-neutral-900 mb-1 font-medium"
-                        style={{
-                          fontFamily: typography.fontFamily.sans.medium,
-                          fontSize: 12,
-                        }}
-                      >
-                        Style
-                      </Text>
-                      <Text
-                        className="text-neutral-800"
-                        style={{
-                          fontFamily: typography.fontFamily.sans.regular,
-                          fontSize: 14,
-                        }}
-                      >
-                        {product.style.join(", ")}
-                      </Text>
-                    </View>
+                    <DetailRow label="Style" value={product.style.join(", ")} />
                   )}
                   {product.occasion && product.occasion.length > 0 && (
-                    <View>
-                      <Text
-                        className="text-neutral-900 mb-1 font-medium"
-                        style={{
-                          fontFamily: typography.fontFamily.sans.medium,
-                          fontSize: 12,
-                        }}
-                      >
-                        Occasion
-                      </Text>
-                      <Text
-                        className="text-neutral-800"
-                        style={{
-                          fontFamily: typography.fontFamily.sans.regular,
-                          fontSize: 14,
-                        }}
-                      >
-                        {product.occasion.join(", ")}
-                      </Text>
-                    </View>
+                    <DetailRow label="Occasion" value={product.occasion.join(", ")} />
+                  )}
+                  {product.season && product.season.length > 0 && (
+                    <DetailRow label="Season" value={product.season.join(", ")} />
+                  )}
+                  {product.attributes?.pattern && (
+                    <DetailRow label="Pattern" value={product.attributes.pattern} />
+                  )}
+                  {product.attributes?.sleeve_type && (
+                    <DetailRow label="Sleeve" value={product.attributes.sleeve_type} />
+                  )}
+                  {product.attributes?.neck_type && (
+                    <DetailRow label="Neck" value={product.attributes.neck_type} />
+                  )}
+                  {product.attributes?.length && (
+                    <DetailRow label="Length" value={product.attributes.length} />
+                  )}
+                  {product.attributes?.waist_type && (
+                    <DetailRow label="Waist" value={product.attributes.waist_type} />
+                  )}
+                  {product.attributes?.closure_type && (
+                    <DetailRow label="Closure" value={product.attributes.closure_type} />
+                  )}
+                  {product.attributes?.care_instructions && product.attributes.care_instructions.length > 0 && (
+                    <DetailRow label="Care" value={product.attributes.care_instructions.join(", ")} />
                   )}
                 </View>
               </Animated.View>
@@ -698,32 +547,17 @@ export default function ProductDetailPage() {
           )}
 
           {/* More Like This */}
-          <View
-            className="mt-2 pt-5 border-t"
-            style={{ borderTopColor: theme.colors.neutral[200] }}
-          >
+          <View className="mt-2 pt-5 border-t" style={{ borderTopColor: theme.colors.neutral[200] }}>
             {loadingSimilar ? (
               <>
-                <Text
-                  className="text-neutral-900 mb-5"
-                  style={{
-                    fontFamily: typography.fontFamily.serif.medium,
-                    fontSize: 18,
-                  }}
-                >
+                <Text className="text-neutral-900 mb-5" style={{ fontFamily: typography.fontFamily.serif.medium, fontSize: 18 }}>
                   More to explore
                 </Text>
                 <MasonryLayout showSkeleton skeletonCount={4} />
               </>
             ) : showMoreLikeThis ? (
               <>
-                <Text
-                  className="text-neutral-900 mb-5"
-                  style={{
-                    fontFamily: typography.fontFamily.serif.medium,
-                    fontSize: 18,
-                  }}
-                >
+                <Text className="text-neutral-900 mb-5" style={{ fontFamily: typography.fontFamily.serif.medium, fontSize: 18 }}>
                   More to explore
                 </Text>
                 <MasonryLayout
@@ -741,47 +575,26 @@ export default function ProductDetailPage() {
       {product.affiliate_url && (
         <View
           className="absolute bottom-0 left-0 right-0 px-5 pt-3 pb-8 bg-white"
-          style={{
-            ...theme.shadows.lg,
-            shadowOffset: { width: 0, height: -2 },
-          }}
+          style={{ ...theme.shadows.lg, shadowOffset: { width: 0, height: -2 } }}
         >
           <TouchableOpacity
             onPress={handleBuyNow}
-            className="h-14 rounded-xl items-center justify-center flex-row"
+            className="h-14 rounded-xl items-center justify-center flex-row gap-2"
             style={{ backgroundColor: theme.colors.primary[500] }}
             activeOpacity={0.9}
           >
-            <Text
-              className="text-white"
-              style={{
-                fontFamily: typography.fontFamily.sans.semibold,
-                fontSize: 16,
-              }}
-            >
+            <Text className="text-white" style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 16 }}>
               Shop Now
             </Text>
             {product.source_platform && (
               <>
-                <Text className="text-white/50 mx-2">·</Text>
-                <Text
-                  className="text-white/90"
-                  style={{
-                    fontFamily: typography.fontFamily.sans.medium,
-                    fontSize: 14,
-                  }}
-                >
-                  {product.source_platform.charAt(0).toUpperCase() +
-                    product.source_platform.slice(1)}
+                <Text className="text-white/50">·</Text>
+                <Text className="text-white/90" style={{ fontFamily: typography.fontFamily.sans.medium, fontSize: 14 }}>
+                  {product.source_platform.charAt(0).toUpperCase() + product.source_platform.slice(1)}
                 </Text>
               </>
             )}
-            <Ionicons
-              name="arrow-forward"
-              size={18}
-              color="white"
-              style={{ marginLeft: 8 }}
-            />
+            <Ionicons name="arrow-forward" size={18} color="white" />
           </TouchableOpacity>
         </View>
       )}
@@ -793,186 +606,144 @@ export default function ProductDetailPage() {
         animationType="slide"
         onRequestClose={() => setShowSaveModal(false)}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={{ flex: 1 }}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
-        >
+        <KeyboardAvoidingViewWrapper>
           <View className="flex-1" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
-            <TouchableOpacity
-              className="flex-1"
-              onPress={() => setShowSaveModal(false)}
-              activeOpacity={1}
-            />
-            <View
-              className="bg-white rounded-t-3xl"
-              style={{ maxHeight: "65%" }}
-            >
-            <View
-              className="flex-row items-center justify-between px-5 py-4 border-b"
-              style={{ borderBottomColor: theme.colors.neutral[200] }}
-            >
-              <Text
-                style={{
-                  fontFamily: typography.fontFamily.serif.medium,
-                  fontSize: 18,
-                  color: theme.colors.neutral[900],
-                }}
+            <TouchableOpacity className="flex-1" onPress={() => setShowSaveModal(false)} activeOpacity={1} />
+            <View className="bg-white rounded-t-3xl" style={{ maxHeight: "65%" }}>
+              <View
+                className="flex-row items-center justify-between px-5 py-4 border-b"
+                style={{ borderBottomColor: theme.colors.neutral[200] }}
               >
-                Save to Collection
-              </Text>
-              <TouchableOpacity onPress={() => setShowSaveModal(false)}>
-                <Ionicons
-                  name="close"
-                  size={24}
-                  color={theme.colors.neutral[600]}
-                />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{
-                padding: 20,
-                paddingBottom: Platform.OS === "ios" ? 40 : 20,
-              }}
-            >
-              <View className="mb-5">
-                <Text
-                  className="mb-2"
-                  style={{
-                    fontFamily: typography.fontFamily.sans.semibold,
-                    fontSize: 13,
-                    color: theme.colors.neutral[700],
-                  }}
-                >
-                  New collection
+                <Text style={{ fontFamily: typography.fontFamily.serif.medium, fontSize: 18, color: theme.colors.neutral[900] }}>
+                  Save to Collection
                 </Text>
-                <View className="flex-row items-center gap-3">
-                  <TextInput
-                    value={newCollectionName}
-                    onChangeText={setNewCollectionName}
-                    placeholder="Collection name"
-                    placeholderTextColor={theme.colors.neutral[400]}
-                    className="flex-1 rounded-xl px-4"
-                    style={{
-                      height: 44,
-                      backgroundColor: theme.colors.neutral[100],
-                      fontFamily: typography.fontFamily.sans.regular,
-                      fontSize: 14,
-                      color: theme.colors.neutral[900],
-                    }}
-                  />
-                  <TouchableOpacity
-                    onPress={() => {
-                      if (newCollectionName.trim() && id) {
-                        const col = wardrobe.createCollection(
-                          newCollectionName.trim()
-                        );
-                        wardrobe.addToCollection(col.id, id);
-                        if (userId && product) {
-                          interactionService.logInteraction(userId, id, 'save').catch(() => {});
-                          preferenceService.handleInteraction(userId, product, 'save').catch(() => {});
-                        }
-                        setNewCollectionName("");
-                        setShowSaveModal(false);
-                      }
-                    }}
-                    className="rounded-xl items-center justify-center"
-                    style={{
-                      height: 44,
-                      paddingHorizontal: 16,
-                      backgroundColor: newCollectionName.trim()
-                        ? theme.colors.primary[500]
-                        : theme.colors.neutral[200],
-                    }}
-                    disabled={!newCollectionName.trim()}
-                  >
-                    <Text
-                      style={{
-                        fontFamily: typography.fontFamily.sans.semibold,
-                        fontSize: 13,
-                        color: newCollectionName.trim()
-                          ? "#FFF"
-                          : theme.colors.neutral[400],
-                      }}
-                    >
-                      Create
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                <TouchableOpacity onPress={() => setShowSaveModal(false)}>
+                  <Ionicons name="close" size={24} color={theme.colors.neutral[600]} />
+                </TouchableOpacity>
               </View>
 
-              {wardrobe.userCollections.length > 0 && (
-                <View>
-                  <Text
-                    className="mb-3"
-                    style={{
-                      fontFamily: typography.fontFamily.sans.semibold,
-                      fontSize: 13,
-                      color: theme.colors.neutral[700],
-                    }}
-                  >
-                    Your collections
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ padding: 20, paddingBottom: Platform.OS === "ios" ? 40 : 20 }}
+              >
+                <View className="mb-5">
+                  <Text className="mb-2" style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 13, color: theme.colors.neutral[700] }}>
+                    New collection
                   </Text>
-                  {wardrobe.userCollections.map((col) => {
-                    const isIn = id ? wardrobe.isInCollection(col.id, id) : false;
-                    return (
-                      <TouchableOpacity
-                        key={col.id}
-                        onPress={() => handleSave(col.id)}
-                        className="flex-row items-center justify-between py-3.5 border-b"
-                        style={{
-                          borderBottomColor: theme.colors.neutral[100],
-                        }}
-                        activeOpacity={0.7}
-                      >
-                        <View className="flex-1 mr-3">
-                          <Text
-                            numberOfLines={1}
-                            style={{
-                              fontFamily: typography.fontFamily.sans.medium,
-                              fontSize: 15,
-                              color: theme.colors.neutral[900],
-                            }}
-                          >
-                            {col.name}
-                          </Text>
-                          <Text
-                            style={{
-                              fontFamily: typography.fontFamily.sans.regular,
-                              fontSize: 12,
-                              color: theme.colors.neutral[500],
-                            }}
-                          >
-                            {col.productIds.length} item
-                            {col.productIds.length !== 1 ? "s" : ""}
-                          </Text>
-                        </View>
-                        <View
-                          className="w-6 h-6 rounded-md items-center justify-center"
-                          style={{
-                            backgroundColor: isIn
-                              ? theme.colors.primary[500]
-                              : "transparent",
-                            borderWidth: isIn ? 0 : 1.5,
-                            borderColor: theme.colors.neutral[300],
-                          }}
-                        >
-                          {isIn && (
-                            <Ionicons name="checkmark" size={16} color="#FFF" />
-                          )}
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
+                  <View className="flex-row items-center gap-3">
+                    <TextInput
+                      value={newCollectionName}
+                      onChangeText={setNewCollectionName}
+                      placeholder="Collection name"
+                      placeholderTextColor={theme.colors.neutral[400]}
+                      className="flex-1 rounded-xl px-4"
+                      style={{
+                        height: 44,
+                        backgroundColor: theme.colors.neutral[100],
+                        fontFamily: typography.fontFamily.sans.regular,
+                        fontSize: 14,
+                        color: theme.colors.neutral[900],
+                      }}
+                    />
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (newCollectionName.trim() && id) {
+                          const col = wardrobe.createCollection(newCollectionName.trim());
+                          wardrobe.addToCollection(col.id, id);
+                          if (userId && productRef.current) {
+                            interactionService.logInteraction(userId, id, 'save').catch(() => {});
+                            preferenceService.handleInteraction(userId, productRef.current, 'save').catch(() => {});
+                          }
+                          setNewCollectionName("");
+                          setShowSaveModal(false);
+                        }
+                      }}
+                      className="rounded-xl items-center justify-center"
+                      style={{
+                        height: 44,
+                        paddingHorizontal: 16,
+                        backgroundColor: newCollectionName.trim() ? theme.colors.primary[500] : theme.colors.neutral[200],
+                      }}
+                      disabled={!newCollectionName.trim()}
+                    >
+                      <Text style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 13, color: newCollectionName.trim() ? "#FFF" : theme.colors.neutral[400] }}>
+                        Create
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              )}
-            </ScrollView>
+
+                {wardrobe.userCollections.length > 0 && (
+                  <View>
+                    <Text className="mb-3" style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 13, color: theme.colors.neutral[700] }}>
+                      Your collections
+                    </Text>
+                    {wardrobe.userCollections.map((col) => {
+                      const isIn = id ? wardrobe.isInCollection(col.id, id) : false;
+                      return (
+                        <TouchableOpacity
+                          key={col.id}
+                          onPress={() => handleSave(col.id)}
+                          className="flex-row items-center justify-between py-3.5 border-b"
+                          style={{ borderBottomColor: theme.colors.neutral[100] }}
+                          activeOpacity={0.7}
+                        >
+                          <View className="flex-1 mr-3">
+                            <Text numberOfLines={1} style={{ fontFamily: typography.fontFamily.sans.medium, fontSize: 15, color: theme.colors.neutral[900] }}>
+                              {col.name}
+                            </Text>
+                            <Text style={{ fontFamily: typography.fontFamily.sans.regular, fontSize: 12, color: theme.colors.neutral[500] }}>
+                              {col.productIds.length} item{col.productIds.length !== 1 ? "s" : ""}
+                            </Text>
+                          </View>
+                          <View
+                            className="w-6 h-6 rounded-md items-center justify-center"
+                            style={{
+                              backgroundColor: isIn ? theme.colors.primary[500] : "transparent",
+                              borderWidth: isIn ? 0 : 1.5,
+                              borderColor: theme.colors.neutral[300],
+                            }}
+                          >
+                            {isIn && <Ionicons name="checkmark" size={16} color="#FFF" />}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+              </ScrollView>
+            </View>
           </View>
-        </View>
-        </KeyboardAvoidingView>
+        </KeyboardAvoidingViewWrapper>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View>
+      <Text style={{ fontFamily: typography.fontFamily.sans.medium, fontSize: 12, color: theme.colors.neutral[500] }}>
+        {label}
+      </Text>
+      <Text style={{ fontFamily: typography.fontFamily.sans.regular, fontSize: 14, color: theme.colors.neutral[800], marginTop: 2 }}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function KeyboardAvoidingViewWrapper({ children }: { children: React.ReactNode }) {
+  const { KeyboardAvoidingView } = require('react-native');
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      style={{ flex: 1 }}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
+    >
+      {children}
+    </KeyboardAvoidingView>
   );
 }
