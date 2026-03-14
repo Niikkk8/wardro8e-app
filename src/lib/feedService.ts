@@ -234,9 +234,9 @@ export const feedService = {
   async getPreferenceFeed(prefs: UserPreferences, options: FeedOptions = {}): Promise<Product[]> {
     const { limit = DEFAULT_LIMIT, offset = 0, excludeIds = [], gender } = options;
 
-    // Try Python service first (uses server-side scoring + CLIP)
-    if (PYTHON_SERVICE_URL) {
-      const pythonResults = await callPythonPersonalizedFeed('__prefs_only__', {
+    // Try Python service first (uses server-side scoring + CLIP). Must pass real user_id so the service can load user_preferences.
+    if (PYTHON_SERVICE_URL && prefs.user_id) {
+      const pythonResults = await callPythonPersonalizedFeed(prefs.user_id, {
         ...options,
         gender: gender || prefs.gender || undefined,
       });
