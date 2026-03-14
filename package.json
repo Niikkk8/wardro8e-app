@@ -9,7 +9,7 @@
     "web": "expo start --web",
     "deploy": "npx expo export -p web && npx eas-cli@latest deploy",
     "reset-storage": "node scripts/reset-storage.js",
-    "eas-build-post-install": "node scripts/patch-agp.js"
+    "eas-build-post-install": "node scripts/patch-agp.js && node scripts/patch-native-modules-agp.js"
   },
   "dependencies": {
     "@expo-google-fonts/montserrat": "^0.4.2",
