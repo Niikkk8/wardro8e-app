@@ -19,7 +19,8 @@
     "slug": "wardro8e",
     "icon": "./assets/icon.png",
     "android": {
-      "package": "com.anonymous.wardro8e"
+      "package": "com.anonymous.wardro8e",
+      "newArchEnabled": false
     },
     "ios": {
       "bundleIdentifier": "com.anonymous.wardro8e"

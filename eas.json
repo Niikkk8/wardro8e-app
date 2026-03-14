@@ -16,7 +16,7 @@
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
       },
-      "prebuildCommand": "npx expo prebuild --clean"
+      "prebuildCommand": "npx expo prebuild --clean && node scripts/patch-gradle-properties.js"
     },
     "preview": {
       "distribution": "internal",
@@ -29,7 +29,7 @@
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
       },
-      "prebuildCommand": "npx expo prebuild --clean"
+      "prebuildCommand": "npx expo prebuild --clean && node scripts/patch-gradle-properties.js"
     },
     "production": {
       "autoIncrement": true,
@@ -42,7 +42,7 @@
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
       },
-      "prebuildCommand": "npx expo prebuild --clean"
+      "prebuildCommand": "npx expo prebuild --clean && node scripts/patch-gradle-properties.js"
     }
   },
   "submit": {
