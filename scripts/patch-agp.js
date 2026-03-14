@@ -1,14 +1,13 @@
 /**
  * EAS Build: patch React Native's Gradle version catalog to use AGP 8.7.2
- * instead of 8.11.0 to avoid "No matching variant" for native modules.
+ * to avoid "No matching variant" / "No variants exist" for native modules.
  * Run as eas-build-post-install (after npm install and prebuild, before Gradle).
  */
 
 const fs = require('fs');
 const path = require('path');
 
-const AGP_OLD = '8.11.0';
-const AGP_NEW = '8.7.2';
+const AGP_TARGET = '8.7.2';
 
 const files = [
   path.join(__dirname, '..', 'node_modules', 'react-native', 'gradle', 'libs.versions.toml'),
@@ -21,11 +20,21 @@ for (const file of files) {
     continue;
   }
   let content = fs.readFileSync(file, 'utf8');
-  if (!content.includes(`agp = "${AGP_OLD}"`)) {
-    console.warn('[patch-agp] No agp version to patch in:', file);
+
+  // Match any agp = "x.y.z" version line
+  const match = content.match(/agp = "(\d+\.\d+\.\d+)"/);
+  if (!match) {
+    console.warn('[patch-agp] No agp version found in:', file);
     continue;
   }
-  content = content.replace(new RegExp(`agp = "${AGP_OLD}"`, 'g'), `agp = "${AGP_NEW}"`);
+
+  const currentVersion = match[1];
+  if (currentVersion === AGP_TARGET) {
+    console.log('[patch-agp] AGP already at target version', AGP_TARGET, 'in', path.relative(process.cwd(), file));
+    continue;
+  }
+
+  content = content.replace(`agp = "${currentVersion}"`, `agp = "${AGP_TARGET}"`);
   fs.writeFileSync(file, content);
-  console.log('[patch-agp] Patched AGP', AGP_OLD, '->', AGP_NEW, 'in', path.relative(process.cwd(), file));
+  console.log('[patch-agp] Patched AGP', currentVersion, '->', AGP_TARGET, 'in', path.relative(process.cwd(), file));
 }
