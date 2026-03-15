@@ -29,6 +29,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { interactionService } from "../../lib/interactionService";
 import { preferenceService } from "../../lib/preferenceService";
 import { recommendationService } from "../../lib/recommendationService";
+import { feedService } from "../../lib/feedService";
 import { clientStorage } from "../../lib/clientStorage";
 
 let Haptics: typeof import("expo-haptics") | null = null;
@@ -162,10 +163,20 @@ export default function ProductDetailPage() {
       }
     }
 
-    // 4. Fetch similar products (uses cache or Python service)
-    const seenIds = userId ? await clientStorage.getSeenProductIds(userId) : [];
+    // 4. Fetch similar products. Use viewer's gender so men don't see women's — except when this product is women's (opened from explore), then show women's in "More to explore".
+    const userGender = userId ? await feedService.getUserGender(userId) : null;
+    const productGender = (resolvedProduct.gender || '').toString().toLowerCase();
+    const isSourceWomens = productGender === 'women' || productGender === 'woman';
+    const similarGender = isSourceWomens
+      ? 'women'
+      : (userGender || (userId ? 'unisex_only' : undefined));
     try {
-      const similar = await recommendationService.getSimilarProducts(resolvedProduct, 12, seenIds);
+      const similar = await recommendationService.getSimilarProducts(
+        resolvedProduct,
+        12,
+        [],
+        similarGender
+      );
       setSimilarProducts(similar);
     } catch (e) {
       console.error("Error fetching similar products:", e);
@@ -279,7 +290,7 @@ export default function ProductDetailPage() {
     product.attributes?.closure_type ||
     (product.attributes?.care_instructions && product.attributes.care_instructions.length > 0);
 
-  const showMoreLikeThis = !loadingSimilar && similarProducts.length >= 3;
+  const showMoreLikeThis = !loadingSimilar && similarProducts.length >= 1;
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-white">

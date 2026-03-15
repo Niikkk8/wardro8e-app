@@ -8,16 +8,28 @@ const DEFAULT_LIMIT = 20;
 const PYTHON_SERVICE_URL = process.env.EXPO_PUBLIC_PYTHON_SERVICE_URL || '';
 const FEED_TIMEOUT_MS = 10000;
 
+function normalizeProductGender(g: string | undefined | null): 'men' | 'women' | 'unisex' {
+  if (g == null || !String(g).trim()) return 'unisex';
+  const s = String(g).trim().toLowerCase();
+  if (s === 'woman' || s === 'women' || s === 'female') return 'women';
+  if (s === 'man' || s === 'men' || s === 'male') return 'men';
+  return 'unisex'; // both, unisex, unknown, kids → show to everyone
+}
+
 function applyGenderFilter(products: Product[], gender?: string | null): Product[] {
   if (!gender || gender === 'both') return products;
-  const genderLower = gender.toLowerCase();
-  if (genderLower === 'women' || genderLower === 'woman') {
-    return products.filter((p) => p.gender === 'women' || p.gender === 'unisex');
+  const genderLower = String(gender).trim().toLowerCase();
+  if (genderLower === 'unisex_only') {
+    return products.filter((p) => normalizeProductGender(p.gender) === 'unisex');
   }
-  if (genderLower === 'men' || genderLower === 'man') {
-    return products.filter((p) => p.gender === 'men' || p.gender === 'unisex');
-  }
-  return products;
+  const wantWomen = genderLower === 'women' || genderLower === 'woman';
+  const wantMen = genderLower === 'men' || genderLower === 'man';
+  if (!wantWomen && !wantMen) return products;
+  return products.filter((p) => {
+    const pg = normalizeProductGender(p.gender);
+    if (pg === 'unisex') return true;
+    return wantWomen ? pg === 'women' : pg === 'men';
+  });
 }
 
 function applyExcludeFilter(products: Product[], excludeIds: string[]): Product[] {
@@ -61,7 +73,7 @@ function scoreByPreferences(product: Product, prefs: UserPreferences): number {
   return score;
 }
 
-function applyBrandDiversityCap(products: Product[], maxPerBrand: number = 2): Product[] {
+function applyBrandDiversityCap(products: Product[], maxPerBrand: number = 5): Product[] {
   const brandCount: Record<string, number> = {};
   return products.filter((p) => {
     const brand = p.source_brand_name || p.brand_id || 'unknown';
@@ -219,7 +231,7 @@ export const feedService = {
     const { limit = DEFAULT_LIMIT, offset = 0, excludeIds = [], gender } = options;
 
     const fetched = await getProducts({
-      limit: Math.max(limit + excludeIds.length + 100, 100),
+      limit: Math.max(limit + excludeIds.length + 100, 150),
       offset: 0,
       gender,
       orderBy: ['is_featured', 'created_at'],
@@ -228,6 +240,24 @@ export const feedService = {
 
     let products = applyExcludeFilter(fetched, excludeIds);
     products = applyBrandDiversityCap(products);
+    const page = paginate(products, limit, offset);
+    if (page.length === 0 && offset === 0) {
+      return this.getUnfilteredFallbackFeed({ limit, offset, gender });
+    }
+    return page;
+  },
+
+  /** Fallback when main feed is empty: no exclusions, but still respect user gender (men/unisex or women/unisex). */
+  async getUnfilteredFallbackFeed(options: FeedOptions = {}): Promise<Product[]> {
+    const { limit = DEFAULT_LIMIT, offset = 0, gender } = options;
+    const fetched = await getProducts({
+      limit: limit + offset + 50,
+      offset: 0,
+      gender,
+      orderBy: ['is_featured', 'created_at'],
+      orderAsc: [false, false],
+    });
+    const products = applyBrandDiversityCap(fetched);
     return paginate(products, limit, offset);
   },
 
@@ -359,15 +389,17 @@ export const feedService = {
       }
     }
 
-    const seenIds = userId ? await clientStorage.getSeenProductIds(userId) : [];
-    const allExcludeIds = [...(feedOptions.excludeIds || []), ...seenIds];
+    // No "already seen" exclusions — with a small catalog that would over-restrict the feed.
+    const allExcludeIds = feedOptions.excludeIds ?? [];
 
     const gender = userId ? await this.getUserGender(userId) : null;
+    // When logged in but gender unknown, use safe default so we never show wrong gender
+    const effectiveGender = feedOptions.gender || gender || (userId ? 'unisex_only' : null);
 
     const mergedOptions: FeedOptions = {
       ...feedOptions,
       excludeIds: allExcludeIds,
-      gender: feedOptions.gender || gender,
+      gender: effectiveGender,
     };
 
     const feedType = await this.determineFeedType(userId);
@@ -394,7 +426,23 @@ export const feedService = {
         products = await this.getColdStartFeed(mergedOptions);
     }
 
+    // If personalized/behavioral/preference returned empty, show something: fallback still respects gender
+    const requestedOffset = (feedOptions.offset ?? 0);
+    if (products.length === 0 && requestedOffset === 0) {
+      if (__DEV__) console.log('[Feed] Empty result, using fallback (still gender-filtered)');
+      products = await this.getUnfilteredFallbackFeed({
+        limit: feedOptions.limit ?? DEFAULT_LIMIT,
+        offset: 0,
+        gender: mergedOptions.gender,
+      });
+    }
+
     // Cache first page only
+    // Client-side gender filter: never show women's to a man (or vice versa), even if backend/cache leaked
+    if (effectiveGender && effectiveGender !== 'both') {
+      products = applyGenderFilter(products, effectiveGender);
+    }
+
     if ((feedOptions.offset || 0) === 0) {
       await clientStorage.setFeedCache(effectiveUserId, products, feedType);
     }

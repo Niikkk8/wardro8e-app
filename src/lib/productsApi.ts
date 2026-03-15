@@ -128,11 +128,14 @@ export async function getProducts(options: GetProductsOptions = {}): Promise<Pro
   } else {
     if (category) query = query.eq('category', category);
     if (gender && gender !== 'both') {
-      const g = gender.toLowerCase();
+      const g = String(gender).toLowerCase();
       if (g === 'women' || g === 'woman') {
-        query = query.or('gender.eq.women,gender.eq.unisex');
+        query = query.or('gender.eq.women,gender.eq.unisex,gender.is.null');
       } else if (g === 'men' || g === 'man') {
-        query = query.or('gender.eq.men,gender.eq.unisex');
+        query = query.or('gender.eq.men,gender.eq.unisex,gender.is.null');
+      } else if (g === 'unisex_only') {
+        // Logged-in user, gender unknown: only unisex so we never show wrong gender
+        query = query.or('gender.eq.unisex,gender.is.null');
       }
     }
   }

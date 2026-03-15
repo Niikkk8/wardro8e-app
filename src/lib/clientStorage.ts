@@ -22,8 +22,9 @@ function styleCounterKey(userId: string) {
 function productCacheKey(productId: string) {
   return `@wardro8e:product_cache_${productId}`;
 }
-function similarCacheKey(productId: string) {
-  return `@wardro8e:similar_cache_${productId}`;
+function similarCacheKey(productId: string, gender?: string | null) {
+  const g = gender && gender !== 'both' ? String(gender) : '';
+  return g ? `@wardro8e:similar_cache_${productId}_${g}` : `@wardro8e:similar_cache_${productId}`;
 }
 function lastInteractionKey(productId: string) {
   return `@wardro8e:last_interaction_${productId}`;
@@ -146,9 +147,9 @@ export const clientStorage = {
   },
 
   // ── Similar Products Cache ──────────────────────────────────────────
-  async getSimilarCache(productId: string): Promise<Product[] | null> {
+  async getSimilarCache(productId: string, gender?: string | null): Promise<Product[] | null> {
     try {
-      const raw = await AsyncStorage.getItem(similarCacheKey(productId));
+      const raw = await AsyncStorage.getItem(similarCacheKey(productId, gender));
       if (!raw) return null;
       const { products, cached_at } = JSON.parse(raw);
       const age = Date.now() - new Date(cached_at).getTime();
@@ -159,10 +160,10 @@ export const clientStorage = {
     }
   },
 
-  async setSimilarCache(productId: string, products: Product[]): Promise<void> {
+  async setSimilarCache(productId: string, products: Product[], gender?: string | null): Promise<void> {
     try {
       await AsyncStorage.setItem(
-        similarCacheKey(productId),
+        similarCacheKey(productId, gender),
         JSON.stringify({ products, cached_at: new Date().toISOString() })
       );
     } catch {}
