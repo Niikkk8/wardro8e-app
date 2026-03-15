@@ -57,7 +57,7 @@ The APK will be at: `C:\W8E\android\app\build\outputs\apk\release\app-release.ap
 
 If you see **"No variants exist"** or **"Could not resolve project :react-native-async-storage_async-storage"** on EAS Build:
 - The default Expo build image is used (no custom image) for better compatibility.
-- **AGP alignment:** AGP is pinned to **8.5.2** everywhere (root `android/build.gradle`, version catalogs, and any native module that pins AGP) via `patch-root-build-gradle.js`, `patch-agp.js`, and `patch-native-modules-agp.js` so all subprojects publish matching variants and "No variants exist" is avoided.
+- **AGP alignment:** AGP is pinned to **8.5.2** everywhere; `patch-root-build-gradle.js` also adds a `subprojects` block so every autolinked library uses the same buildscript and publishes matching variants.
 - A post-prebuild script disables the `lintVitalReportRelease` task so release builds can complete.
 - Run: `eas build --platform android --profile preview` again.
 
