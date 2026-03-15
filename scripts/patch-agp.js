@@ -1,12 +1,13 @@
 /**
- * EAS Build: align AGP to React Native's default (8.11.0) so app and native modules
- * use the same version and variant matching succeeds. Run as eas-build-post-install.
+ * EAS Build: pin AGP to 8.5.2 in version catalogs so app and native modules
+ * use the same version as the root build.gradle (see patch-root-build-gradle.js).
+ * Run as eas-build-post-install.
  */
 
 const fs = require('fs');
 const path = require('path');
 
-const AGP_TARGET = '8.11.0';
+const AGP_TARGET = '8.5.2';
 
 const files = [
   path.join(__dirname, '..', 'node_modules', 'react-native', 'gradle', 'libs.versions.toml'),
