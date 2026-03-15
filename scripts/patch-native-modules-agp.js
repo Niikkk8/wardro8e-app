@@ -1,7 +1,6 @@
 /**
- * EAS Build: patch ALL native modules in node_modules to use AGP 8.7.2.
- * Fixes "No variants exist" when the app uses AGP 8.7.x and libraries pin older versions.
- * Run in eas-build-post-install (after npm install, before prebuild).
+ * EAS Build: patch native modules that pin AGP to use the same version as RN (8.11.0).
+ * Aligns variant attributes so "No variants exist" is avoided. Run in eas-build-post-install.
  */
 
 const fs = require('fs');
@@ -9,7 +8,7 @@ const path = require('path');
 
 const rootDir = path.join(__dirname, '..');
 const nodeModules = path.join(rootDir, 'node_modules');
-const AGP_VERSION = '8.7.2';
+const AGP_VERSION = '8.11.0';
 
 // Match any classpath that pins a specific AGP version (captures full line variations)
 const AGP_PATTERN = /classpath\s*\(\s*["']com\.android\.tools\.build:gradle:[^"']+["']\s*\)|classpath\s*["']com\.android\.tools\.build:gradle:[^"']+["']/g;
