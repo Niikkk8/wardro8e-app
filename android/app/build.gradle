@@ -130,6 +130,9 @@ android {
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
+    lint {
+        checkReleaseBuilds false
+    }
 }
 
 // Apply static values from `gradle.properties` to the `android.packagingOptions`
@@ -178,5 +181,12 @@ dependencies {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
+    }
+}
+
+// EAS Build: prevent "No variants exist" — do not resolve release classpath for this task
+tasks.configureEach { task ->
+    if (task.name == 'lintVitalReportRelease') {
+        task.enabled = false
     }
 }

@@ -55,6 +55,11 @@ The APK will be at: `C:\W8E\android\app\build\outputs\apk\release\app-release.ap
 
 ### Option 2: Use EAS Build (Cloud Build - Easiest)
 
+If you see **"No variants exist"** or **"Could not resolve project :react-native-async-storage_async-storage"** on EAS Build:
+- The default Expo build image is used (no custom image) for better compatibility.
+- A post-prebuild script disables the `lintVitalReportRelease` task so release builds can complete.
+- Run: `eas build --platform android --profile preview` again.
+
 1. **Install EAS CLI:**
    ```powershell
    npm install -g eas-cli

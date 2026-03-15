@@ -10,39 +10,36 @@
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease",
-        "applicationArchivePath": "android/app/build/outputs/apk/release/app-release.apk",
-        "image": "ubuntu-22.04-jdk-17-ndk-r26b"
+        "applicationArchivePath": "android/app/build/outputs/apk/release/app-release.apk"
       },
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
       },
-      "prebuildCommand": "npx expo prebuild --clean && node scripts/patch-gradle-properties.js && node scripts/patch-native-modules-agp.js"
+      "prebuildCommand": "npx expo prebuild --clean && node scripts/patch-gradle-properties.js && node scripts/patch-native-modules-agp.js && node scripts/patch-app-build-gradle.js"
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease",
-        "applicationArchivePath": "android/app/build/outputs/apk/release/app-release.apk",
-        "image": "ubuntu-22.04-jdk-17-ndk-r26b"
+        "applicationArchivePath": "android/app/build/outputs/apk/release/app-release.apk"
       },
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
       },
-      "prebuildCommand": "npx expo prebuild --clean && node scripts/patch-gradle-properties.js && node scripts/patch-native-modules-agp.js"
+      "prebuildCommand": "npx expo prebuild --clean && node scripts/patch-gradle-properties.js && node scripts/patch-native-modules-agp.js && node scripts/patch-app-build-gradle.js"
     },
     "production": {
       "autoIncrement": true,
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease",
-        "applicationArchivePath": "android/app/build/outputs/apk/release/app-release.apk",
-        "image": "ubuntu-22.04-jdk-17-ndk-r26b"
+        "applicationArchivePath": "android/app/build/outputs/apk/release/app-release.apk"
       },
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
       },
-      "prebuildCommand": "npx expo prebuild --clean && node scripts/patch-gradle-properties.js && node scripts/patch-native-modules-agp.js"
+      "prebuildCommand": "npx expo prebuild --clean && node scripts/patch-gradle-properties.js && node scripts/patch-native-modules-agp.js && node scripts/patch-app-build-gradle.js"
     }
   },
   "submit": {
