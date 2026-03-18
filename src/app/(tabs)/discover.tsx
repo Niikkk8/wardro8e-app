@@ -53,15 +53,15 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // ── Vibe / style moods ────────────────────────────────────────────────────────
 const VIBES = [
-  { label: 'All',        icon: 'apps-outline' },
-  { label: 'Casual',     icon: 'sunny-outline' },
-  { label: 'Minimal',    icon: 'square-outline' },
-  { label: 'Bohemian',   icon: 'leaf-outline' },
-  { label: 'Formal',     icon: 'briefcase-outline' },
-  { label: 'Street',     icon: 'flash-outline' },
-  { label: 'Date Night', icon: 'heart-outline' },
-  { label: 'Sporty',     icon: 'barbell-outline' },
-  { label: 'Party',      icon: 'sparkles-outline' },
+  { label: 'All' },
+  { label: 'Casual' },
+  { label: 'Minimal' },
+  { label: 'Bohemian' },
+  { label: 'Formal' },
+  { label: 'Street' },
+  { label: 'Date Night' },
+  { label: 'Sporty' },
+  { label: 'Party' },
 ] as const;
 
 const PAGE_SIZE = 24;
@@ -724,6 +724,8 @@ function TrendingCard({
     ? Math.round(((product.price - product.sale_price!) / product.price) * 100)
     : 0;
 
+  // Shadow on outer wrapper (no overflow:hidden) → shadow is not clipped.
+  // overflow:hidden on inner view → image + gradient stay within border radius.
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -732,109 +734,67 @@ function TrendingCard({
         width: TRENDING_CARD_WIDTH,
         height: TRENDING_CARD_HEIGHT,
         borderRadius: 18,
-        overflow: 'hidden',
         backgroundColor: theme.colors.neutral[100],
         ...theme.shadows.md,
       }}
     >
-      {imageUrl && !imgError ? (
-        <Image
-          source={{ uri: imageUrl }}
-          style={{ width: '100%', height: '100%', resizeMode: 'cover' }}
-          onError={() => setImgError(true)}
-        />
-      ) : (
-        <View
-          style={{
-            flex: 1,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: theme.colors.neutral[100],
-          }}
-        >
-          <Ionicons name="image-outline" size={32} color={theme.colors.neutral[300]} />
-        </View>
-      )}
-
-      {/* Gradient overlay */}
-      <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-        {LinearGradient ? (
-          <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.72)', 'rgba(0,0,0,0.92)']}
-            style={{ padding: 12, paddingTop: 32 }}
-          >
-            <TrendingCardContent
-              product={product}
-              displayPrice={displayPrice}
-              hasDiscount={hasDiscount}
-              discountPct={discountPct}
-            />
-          </LinearGradient>
+      <View style={{ width: '100%', height: '100%', borderRadius: 18, overflow: 'hidden' }}>
+        {imageUrl && !imgError ? (
+          <Image
+            source={{ uri: imageUrl }}
+            style={{ width: '100%', height: '100%', resizeMode: 'cover' }}
+            onError={() => setImgError(true)}
+          />
         ) : (
-          <View
-            style={{
-              padding: 12,
-              paddingTop: 32,
-              backgroundColor: 'rgba(0,0,0,0.75)',
-            }}
-          >
-            <TrendingCardContent
-              product={product}
-              displayPrice={displayPrice}
-              hasDiscount={hasDiscount}
-              discountPct={discountPct}
-            />
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.neutral[100] }}>
+            <Ionicons name="image-outline" size={32} color={theme.colors.neutral[300]} />
           </View>
         )}
-      </View>
 
-      {/* Discount badge */}
-      {hasDiscount && (
-        <View
-          style={{
-            position: 'absolute',
-            top: 10,
-            left: 10,
-            backgroundColor: theme.colors.error,
-            borderRadius: 8,
-            paddingHorizontal: 7,
-            paddingVertical: 3,
-          }}
-        >
-          <Text
+        {/* Gradient overlay */}
+        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+          {LinearGradient ? (
+            <LinearGradient
+              colors={['transparent', 'rgba(0,0,0,0.72)', 'rgba(0,0,0,0.92)']}
+              style={{ padding: 12, paddingTop: 32 }}
+            >
+              <TrendingCardContent
+                product={product}
+                displayPrice={displayPrice}
+                hasDiscount={hasDiscount}
+                discountPct={discountPct}
+              />
+            </LinearGradient>
+          ) : (
+            <View style={{ padding: 12, paddingTop: 32, backgroundColor: 'rgba(0,0,0,0.75)' }}>
+              <TrendingCardContent
+                product={product}
+                displayPrice={displayPrice}
+                hasDiscount={hasDiscount}
+                discountPct={discountPct}
+              />
+            </View>
+          )}
+        </View>
+
+        {/* Discount badge */}
+        {hasDiscount && (
+          <View
             style={{
-              fontFamily: typography.fontFamily.sans.bold,
-              fontSize: 10,
-              color: '#fff',
+              position: 'absolute',
+              top: 10,
+              left: 10,
+              backgroundColor: theme.colors.error,
+              borderRadius: 8,
+              paddingHorizontal: 7,
+              paddingVertical: 3,
             }}
           >
-            -{discountPct}%
-          </Text>
-        </View>
-      )}
-
-      {/* Trending badge */}
-      <View
-        style={{
-          position: 'absolute',
-          top: 10,
-          right: 10,
-          backgroundColor: 'rgba(255,255,255,0.2)',
-          borderRadius: 8,
-          paddingHorizontal: 7,
-          paddingVertical: 3,
-        }}
-      >
-        <Text
-          style={{
-            fontFamily: typography.fontFamily.sans.semibold,
-            fontSize: 9,
-            color: '#fff',
-            letterSpacing: 0.5,
-          }}
-        >
-          TRENDING
-        </Text>
+            <Text style={{ fontFamily: typography.fontFamily.sans.bold, fontSize: 10, color: '#fff' }}>
+              -{discountPct}%
+            </Text>
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -984,7 +944,7 @@ function CollectionsStrip({ collections }: { collections: Collection[] }) {
         decelerationRate="fast"
         snapToInterval={COLL_CARD_W + 12}
         snapToAlignment="start"
-        contentContainerStyle={{ paddingHorizontal: theme.spacing.lg, paddingVertical: 6, gap: 12 }}
+        contentContainerStyle={{ paddingHorizontal: theme.spacing.lg, paddingTop: 4, paddingBottom: 10, gap: 12 }}
       >
         {collections.map((col) => (
           <CollectionCard

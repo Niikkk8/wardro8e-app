@@ -18,8 +18,8 @@ import { preferenceService } from '@/lib/preferenceService';
 import { theme } from '@/styles/theme';
 import { typography } from '@/styles/typography';
 
-let Haptics: typeof import('expo-haptics') | null = null;
-try { Haptics = require('expo-haptics'); } catch {}
+let Haptics: any = null;
+try { Haptics = require('expo-haptics'); } catch (_) {}
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
