@@ -21,45 +21,48 @@ import { typography } from '@/styles/typography';
 let Haptics: typeof import('expo-haptics') | null = null;
 try { Haptics = require('expo-haptics'); } catch {}
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// 4-col grid: 24px padding × 2 sides + 8px gap × 3 = 48+24 = 72px overhead
-const CHIP_SIZE = Math.floor((SCREEN_WIDTH - 72) / 4);
+// 3-col grid: 24px padding × 2 + 8px gap × 2 = 64px overhead
+const CHIP_W = Math.floor((SCREEN_WIDTH - 64) / 3);
+// 3-col colour: same rhythm
+const COLOR_DOT = Math.floor((SCREEN_WIDTH - 64) / 3);
 
 // ── Data ──────────────────────────────────────────────────────────────────────
 const styleOptions = [
-  { id: 'minimalist', label: 'Minimal',    icon: 'remove-outline'      },
-  { id: 'bohemian',   label: 'Boho',       icon: 'leaf-outline'        },
-  { id: 'casual',     label: 'Casual',     icon: 'sunny-outline'       },
-  { id: 'romantic',   label: 'Romantic',   icon: 'heart-outline'       },
-  { id: 'edgy',       label: 'Edgy',       icon: 'flash-outline'       },
-  { id: 'classic',    label: 'Classic',    icon: 'ribbon-outline'      },
-  { id: 'streetwear', label: 'Street',     icon: 'layers-outline'      },
-  { id: 'elegant',    label: 'Elegant',    icon: 'sparkles-outline'    },
+  { id: 'minimalist', label: 'Minimalist' },
+  { id: 'bohemian',   label: 'Bohemian'   },
+  { id: 'casual',     label: 'Casual'     },
+  { id: 'romantic',   label: 'Romantic'   },
+  { id: 'edgy',       label: 'Edgy'       },
+  { id: 'classic',    label: 'Classic'    },
+  { id: 'streetwear', label: 'Streetwear' },
+  { id: 'elegant',    label: 'Elegant'    },
+  { id: 'sporty',     label: 'Sporty'     },
 ] as const;
 
 const colorOptions = [
-  { id: 'black',   label: 'Black',   hex: '#111111', border: '#555' },
-  { id: 'white',   label: 'White',   hex: '#FFFFFF', border: '#DDD' },
-  { id: 'navy',    label: 'Navy',    hex: '#1E3A5F', border: '#1E3A5F' },
-  { id: 'pink',    label: 'Pink',    hex: '#F472B6', border: '#F472B6' },
-  { id: 'red',     label: 'Red',     hex: '#EF4444', border: '#EF4444' },
-  { id: 'green',   label: 'Green',   hex: '#10B981', border: '#10B981' },
-  { id: 'beige',   label: 'Beige',   hex: '#D4C5B0', border: '#B8A898' },
-  { id: 'grey',    label: 'Grey',    hex: '#9CA3AF', border: '#9CA3AF' },
-  { id: 'brown',   label: 'Brown',   hex: '#92400E', border: '#92400E' },
-  { id: 'purple',  label: 'Purple',  hex: '#8B5CF6', border: '#8B5CF6' },
-  { id: 'yellow',  label: 'Yellow',  hex: '#FBBF24', border: '#FBBF24' },
-  { id: 'teal',    label: 'Teal',    hex: '#208B84', border: '#208B84' },
+  { id: 'black',  label: 'Black',  hex: '#111111', border: '#555'    },
+  { id: 'white',  label: 'White',  hex: '#FFFFFF', border: '#DDD'    },
+  { id: 'navy',   label: 'Navy',   hex: '#1E3A5F', border: '#1E3A5F' },
+  { id: 'pink',   label: 'Pink',   hex: '#F472B6', border: '#F472B6' },
+  { id: 'red',    label: 'Red',    hex: '#EF4444', border: '#EF4444' },
+  { id: 'green',  label: 'Green',  hex: '#10B981', border: '#10B981' },
+  { id: 'beige',  label: 'Beige',  hex: '#D4C5B0', border: '#B8A898' },
+  { id: 'grey',   label: 'Grey',   hex: '#9CA3AF', border: '#9CA3AF' },
+  { id: 'brown',  label: 'Brown',  hex: '#92400E', border: '#92400E' },
+  { id: 'purple', label: 'Purple', hex: '#8B5CF6', border: '#8B5CF6' },
+  { id: 'yellow', label: 'Yellow', hex: '#FBBF24', border: '#FBBF24' },
+  { id: 'teal',   label: 'Teal',   hex: '#208B84', border: '#208B84' },
 ] as const;
 
 const patternOptions = [
-  { id: 'solids',    label: 'Solids',    desc: 'Clean, one-tone' },
-  { id: 'florals',   label: 'Florals',   desc: 'Botanical prints' },
-  { id: 'stripes',   label: 'Stripes',   desc: 'Lines & pinstripes' },
-  { id: 'geometric', label: 'Geometric', desc: 'Shapes & repeats' },
-  { id: 'abstract',  label: 'Abstract',  desc: 'Artistic, freeform' },
-  { id: 'animal',    label: 'Animal',    desc: 'Leopard, zebra & co.' },
+  { id: 'solids',    label: 'Solids',    desc: 'Clean, one-tone'     },
+  { id: 'florals',   label: 'Florals',   desc: 'Botanical prints'    },
+  { id: 'stripes',   label: 'Stripes',   desc: 'Lines & pinstripes'  },
+  { id: 'geometric', label: 'Geometric', desc: 'Shapes & repeats'    },
+  { id: 'abstract',  label: 'Abstract',  desc: 'Artistic, freeform'  },
+  { id: 'animal',    label: 'Animal',    desc: 'Leopard, zebra & co' },
 ] as const;
 
 interface ColorOption   { id: string; label: string; hex: string; border: string }
@@ -156,10 +159,10 @@ export default function StyleQuizScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
-      <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 16 }}>
+      <View style={{ flex: 1, paddingHorizontal: 24 }}>
 
         {/* Progress bar */}
-        <View style={{ height: 2, backgroundColor: theme.colors.neutral[100], borderRadius: 1, marginBottom: 28 }}>
+        <View style={{ height: 2, backgroundColor: theme.colors.neutral[100], borderRadius: 1, marginTop: 16, marginBottom: 28 }}>
           <Animated.View
             style={{ height: '100%', width: progressWidth, backgroundColor: theme.colors.primary[500], borderRadius: 1 }}
           />
@@ -188,23 +191,24 @@ export default function StyleQuizScreen() {
           {step === 1 ? 'Pick 3+ aesthetics that speak to you.' : 'Tap anything that draws your eye.'}
         </Text>
 
-        {/* Content */}
-        {step === 1 ? (
-          /* ── Step 1: 4-col chip grid ── */
+        {/* ── Step 1: text-only 3-col chip grid ─────────────────────────────── */}
+        {step === 1 && (
           <StyleChipGrid
             options={styleOptions}
             selected={selectedStyles}
             onToggle={(id) => toggle(id, selectedStyles, setSelectedStyles)}
           />
-        ) : (
-          /* ── Step 2: Colors + Patterns (scrollable) ── */
+        )}
+
+        {/* ── Step 2: Colours + Patterns ────────────────────────────────────── */}
+        {step === 2 && (
           <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }}>
             <ColorGrid
               options={colorOptions}
               selected={selectedColors}
               onToggle={(id) => toggle(id, selectedColors, setSelectedColors)}
             />
-            <View style={{ height: 1, backgroundColor: theme.colors.neutral[100], marginVertical: 22 }} />
+            <View style={{ height: 1, backgroundColor: theme.colors.neutral[100], marginVertical: 24 }} />
             <PatternList
               options={patternOptions}
               selected={selectedPatterns}
@@ -213,12 +217,11 @@ export default function StyleQuizScreen() {
           </ScrollView>
         )}
 
-        {/* Spacer */}
-        <View style={{ flex: 1 }} />
+        {/* Spacer — only on step 1 where grid is fixed height */}
+        {step === 1 && <View style={{ flex: 1 }} />}
 
-        {/* Bottom actions */}
+        {/* ── Bottom actions ─────────────────────────────────────────────────── */}
         <View style={{ paddingBottom: 8, paddingTop: 12 }}>
-          {/* Counter hint — step 1 */}
           {step === 1 && (
             <Text
               style={{
@@ -286,7 +289,7 @@ export default function StyleQuizScreen() {
   );
 }
 
-// ── Style chips: 4-col compact grid ───────────────────────────────────────────
+// ── Style chips: text-only, 3 columns ─────────────────────────────────────────
 function StyleChipGrid({
   options, selected, onToggle,
 }: {
@@ -294,12 +297,10 @@ function StyleChipGrid({
   selected: string[];
   onToggle: (id: string) => void;
 }) {
-  // Pair into rows of 4
   const rows: (typeof styleOptions[number])[][] = [];
-  for (let i = 0; i < options.length; i += 4) {
-    rows.push(Array.from(options).slice(i, i + 4));
+  for (let i = 0; i < options.length; i += 3) {
+    rows.push(Array.from(options).slice(i, i + 3));
   }
-
   return (
     <View style={{ gap: 8 }}>
       {rows.map((row, ri) => (
@@ -307,10 +308,14 @@ function StyleChipGrid({
           {row.map((s) => (
             <StyleChip
               key={s.id}
-              item={s}
+              label={s.label}
               selected={selected.includes(s.id)}
               onPress={() => onToggle(s.id)}
             />
+          ))}
+          {/* Pad row with invisible flex spacers if < 3 items */}
+          {row.length < 3 && Array.from({ length: 3 - row.length }).map((_, i) => (
+            <View key={`spacer-${i}`} style={{ flex: 1 }} />
           ))}
         </View>
       ))}
@@ -319,9 +324,9 @@ function StyleChipGrid({
 }
 
 function StyleChip({
-  item, selected, onPress,
+  label, selected, onPress,
 }: {
-  item: typeof styleOptions[number];
+  label: string;
   selected: boolean;
   onPress: () => void;
 }) {
@@ -329,7 +334,7 @@ function StyleChip({
 
   const handlePress = () => {
     Animated.sequence([
-      Animated.timing(scaleAnim, { toValue: 0.9, duration: 70, useNativeDriver: true }),
+      Animated.timing(scaleAnim, { toValue: 0.93, duration: 70, useNativeDriver: true }),
       Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true }),
     ]).start();
     onPress();
@@ -341,48 +346,34 @@ function StyleChip({
         onPress={handlePress}
         activeOpacity={0.85}
         style={{
-          height: CHIP_SIZE + 4,
-          borderRadius: 14,
+          height: 48,
+          borderRadius: 12,
           borderWidth: 1.5,
           borderColor: selected ? theme.colors.primary[500] : theme.colors.neutral[200],
-          backgroundColor: selected ? theme.colors.primary[50] : '#FAFAFA',
+          backgroundColor: selected ? theme.colors.primary[600] : '#FAFAFA',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 6,
-          paddingVertical: 8,
+          paddingHorizontal: 6,
         }}
       >
-        {/* Icon circle */}
-        <View
-          style={{
-            width: 34, height: 34, borderRadius: 17,
-            backgroundColor: selected ? theme.colors.primary[100] : theme.colors.neutral[100],
-            alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          <Ionicons
-            name={item.icon as any}
-            size={17}
-            color={selected ? theme.colors.primary[600] : theme.colors.neutral[500]}
-          />
-        </View>
         <Text
           style={{
-            fontFamily: typography.fontFamily.sans.medium,
-            fontSize: 11,
-            color: selected ? theme.colors.primary[700] : theme.colors.neutral[600],
+            fontFamily: selected ? typography.fontFamily.sans.semibold : typography.fontFamily.sans.medium,
+            fontSize: 13,
+            color: selected ? '#fff' : theme.colors.neutral[700],
             textAlign: 'center',
           }}
           numberOfLines={1}
+          adjustsFontSizeToFit
         >
-          {item.label}
+          {label}
         </Text>
       </TouchableOpacity>
     </Animated.View>
   );
 }
 
-// ── Colour grid: 4 cols ────────────────────────────────────────────────────────
+// ── Colour grid: 3 cols, bigger circles ───────────────────────────────────────
 function ColorGrid({
   options, selected, onToggle,
 }: {
@@ -390,14 +381,15 @@ function ColorGrid({
   selected: string[];
   onToggle: (id: string) => void;
 }) {
-  const DOT = Math.floor((SCREEN_WIDTH - 72) / 4); // same as chip width
+  // Circle takes ~70% of cell, label below
+  const circleSize = Math.floor(COLOR_DOT * 0.72);
 
   return (
     <>
       <Text style={{
         fontFamily: typography.fontFamily.sans.semibold,
         fontSize: 11, color: theme.colors.neutral[400],
-        letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 14,
+        letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 16,
       }}>
         Colours
       </Text>
@@ -409,39 +401,42 @@ function ColorGrid({
               key={c.id}
               onPress={() => onToggle(c.id)}
               activeOpacity={0.8}
-              style={{ width: DOT, alignItems: 'center', gap: 5 }}
+              style={{ width: COLOR_DOT, alignItems: 'center', gap: 7, paddingVertical: 6 }}
             >
               <View
                 style={{
-                  width: DOT - 2, height: DOT - 2,
-                  borderRadius: (DOT - 2) / 2,
+                  width: circleSize,
+                  height: circleSize,
+                  borderRadius: circleSize / 2,
                   backgroundColor: c.hex,
-                  borderWidth: on ? 2.5 : 1.5,
+                  borderWidth: on ? 3 : 1.5,
                   borderColor: on ? theme.colors.primary[500] : c.border,
-                  alignItems: 'center', justifyContent: 'center',
-                  shadowColor: on ? theme.colors.primary[500] : '#000',
-                  shadowOffset: { width: 0, height: on ? 2 : 1 },
-                  shadowOpacity: on ? 0.25 : 0.06,
-                  shadowRadius: on ? 4 : 2,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: on ? 3 : 1 },
+                  shadowOpacity: on ? 0.18 : 0.06,
+                  shadowRadius: on ? 5 : 2,
                   elevation: on ? 4 : 1,
                 }}
               >
                 {on && (
-                  <View style={{
-                    width: 14, height: 14, borderRadius: 7,
-                    backgroundColor: 'rgba(255,255,255,0.92)',
-                    alignItems: 'center', justifyContent: 'center',
-                  }}>
-                    <Ionicons name="checkmark" size={9} color={theme.colors.primary[600]} />
-                  </View>
+                  <Ionicons
+                    name="checkmark"
+                    size={circleSize * 0.3}
+                    color={c.hex === '#FFFFFF' || c.hex === '#FBBF24' || c.hex === '#D4C5B0' ? theme.colors.primary[600] : '#fff'}
+                  />
                 )}
               </View>
-              <Text style={{
-                fontFamily: typography.fontFamily.sans.medium,
-                fontSize: 10,
-                color: on ? theme.colors.primary[600] : theme.colors.neutral[500],
-                textAlign: 'center',
-              }} numberOfLines={1}>
+              <Text
+                style={{
+                  fontFamily: typography.fontFamily.sans.medium,
+                  fontSize: 11,
+                  color: on ? theme.colors.primary[600] : theme.colors.neutral[500],
+                  textAlign: 'center',
+                }}
+                numberOfLines={1}
+              >
                 {c.label}
               </Text>
             </TouchableOpacity>
@@ -480,7 +475,7 @@ function PatternList({
               style={{
                 flexDirection: 'row', alignItems: 'center',
                 justifyContent: 'space-between',
-                paddingHorizontal: 14, paddingVertical: 12,
+                paddingHorizontal: 14, paddingVertical: 13,
                 borderRadius: 12,
                 borderWidth: 1.5,
                 borderColor: on ? theme.colors.primary[400] : theme.colors.neutral[200],

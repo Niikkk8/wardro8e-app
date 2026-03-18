@@ -37,6 +37,7 @@ import { typography } from '../../styles/typography';
 import { Product } from '../../types';
 import { getProducts } from '../../lib/productsApi';
 import { exploreService, feedService } from '../../lib/feedService';
+import { getCollections, Collection } from '../../data/collections';
 import { interactionService } from '../../lib/interactionService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWardrobe } from '../../contexts/WardrobeContext';
@@ -91,11 +92,21 @@ export default function DiscoverPage() {
   const [sheetProduct, setSheetProduct] = useState<Product | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
 
+  // Collections strip
+  const [collections, setCollections] = useState<Collection[]>([]);
+
   // Gender for recommendations
   const [userGender, setUserGender] = useState<string | null>(null);
 
   // Scroll-based header shrink
   const scrollY = useRef(new Animated.Value(0)).current;
+
+  // ── Collections ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    getProducts({ limit: 300 })
+      .then((products) => setCollections(getCollections(products).slice(0, 6)))
+      .catch(() => {});
+  }, []);
 
   // ── User gender ────────────────────────────────────────────────────────────
   // Gate: don't load feed until gender is resolved to avoid wrong-gender flash.
@@ -376,6 +387,11 @@ export default function DiscoverPage() {
               />
             )}
 
+            {/* Collections strip */}
+            {collections.length > 0 && (
+              <CollectionsStrip collections={collections} />
+            )}
+
             {/* Section header */}
             <View
               style={{
@@ -596,7 +612,7 @@ function VibePills({
         gap: 8,
       }}
     >
-      {vibes.map(({ label, icon }) => {
+      {vibes.map(({ label }) => {
         const active = selectedVibe === label;
         return (
           <TouchableOpacity
@@ -604,9 +620,6 @@ function VibePills({
             onPress={() => onSelect(label)}
             activeOpacity={0.75}
             style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 5,
               paddingHorizontal: 14,
               paddingVertical: 8,
               borderRadius: 24,
@@ -615,11 +628,6 @@ function VibePills({
               borderColor: active ? theme.colors.primary[600] : theme.colors.neutral[200],
             }}
           >
-            <Ionicons
-              name={icon as any}
-              size={13}
-              color={active ? '#fff' : theme.colors.neutral[500]}
-            />
             <Text
               style={{
                 fontFamily: active
@@ -663,15 +671,6 @@ function TrendingStrip({
           marginBottom: 12,
         }}
       >
-        <View
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: 3,
-            backgroundColor: theme.colors.error,
-            marginRight: 7,
-          }}
-        />
         <Text
           style={{
             fontFamily: typography.fontFamily.sans.semibold,
@@ -824,19 +823,8 @@ function TrendingCard({
           borderRadius: 8,
           paddingHorizontal: 7,
           paddingVertical: 3,
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 3,
         }}
       >
-        <View
-          style={{
-            width: 5,
-            height: 5,
-            borderRadius: 2.5,
-            backgroundColor: theme.colors.error,
-          }}
-        />
         <Text
           style={{
             fontFamily: typography.fontFamily.sans.semibold,
@@ -941,5 +929,158 @@ function TrendingSkeletonCard() {
         opacity,
       }}
     />
+  );
+}
+
+// ── Collections Strip ──────────────────────────────────────────────────────────
+import { router as expoRouter } from 'expo-router';
+
+const COLL_CARD_W = SCREEN_WIDTH * 0.42;
+const COLL_IMG_SIZE = (COLL_CARD_W - 2) / 2; // 2x2 mosaic cell
+
+function CollectionsStrip({ collections }: { collections: Collection[] }) {
+  return (
+    <View style={{ marginTop: 20 }}>
+      {/* Header */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingHorizontal: theme.spacing.lg,
+          marginBottom: 12,
+        }}
+      >
+        <Text
+          style={{
+            fontFamily: typography.fontFamily.sans.semibold,
+            fontSize: 13,
+            color: theme.colors.neutral[700],
+            letterSpacing: 0.8,
+            textTransform: 'uppercase',
+          }}
+        >
+          Collections
+        </Text>
+        <TouchableOpacity
+          onPress={() => expoRouter.push('/collection')}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text
+            style={{
+              fontFamily: typography.fontFamily.sans.medium,
+              fontSize: 13,
+              color: theme.colors.primary[600],
+            }}
+          >
+            See all
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        decelerationRate="fast"
+        snapToInterval={COLL_CARD_W + 12}
+        snapToAlignment="start"
+        contentContainerStyle={{ paddingHorizontal: theme.spacing.lg, paddingVertical: 6, gap: 12 }}
+      >
+        {collections.map((col) => (
+          <CollectionCard
+            key={col.id}
+            collection={col}
+            onPress={() => expoRouter.push(`/collection/${col.id}`)}
+          />
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+function CollectionCard({
+  collection,
+  onPress,
+}: {
+  collection: Collection;
+  onPress: () => void;
+}) {
+  const [imgErrors, setImgErrors] = useState<Set<number>>(new Set());
+  const images = collection.coverImages.slice(0, 4);
+
+  // Shadow lives on outer wrapper (no overflow:hidden so shadow isn't clipped).
+  // Border radius + overflow:hidden are on the inner content view.
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.88}
+      style={{
+        width: COLL_CARD_W,
+        borderRadius: 14,
+        backgroundColor: theme.colors.neutral[50],
+        ...theme.shadows.sm,
+      }}
+    >
+      <View style={{ borderRadius: 14, overflow: 'hidden' }}>
+        {/* 2×2 mosaic */}
+        <View
+          style={{
+            width: COLL_CARD_W,
+            height: COLL_CARD_W,
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: 1.5,
+          }}
+        >
+          {Array.from({ length: 4 }).map((_, idx) => {
+            const url = images[idx];
+            if (!url || imgErrors.has(idx)) {
+              return (
+                <View
+                  key={idx}
+                  style={{
+                    width: COLL_IMG_SIZE,
+                    height: COLL_IMG_SIZE,
+                    backgroundColor: theme.colors.neutral[200],
+                  }}
+                />
+              );
+            }
+            return (
+              <Image
+                key={idx}
+                source={{ uri: url }}
+                style={{ width: COLL_IMG_SIZE, height: COLL_IMG_SIZE, resizeMode: 'cover' }}
+                onError={() => setImgErrors((prev) => new Set(prev).add(idx))}
+              />
+            );
+          })}
+        </View>
+
+        {/* Info */}
+        <View style={{ padding: 10 }}>
+          <Text
+            numberOfLines={1}
+            style={{
+              fontFamily: typography.fontFamily.serif.medium,
+              fontSize: 13,
+              color: theme.colors.neutral[900],
+            }}
+          >
+            {collection.name}
+          </Text>
+          <Text
+            style={{
+              fontFamily: typography.fontFamily.sans.regular,
+              fontSize: 10,
+              color: theme.colors.neutral[400],
+              marginTop: 2,
+            }}
+          >
+            {collection.saves} saves
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
   );
 }
