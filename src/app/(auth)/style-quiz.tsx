@@ -1,104 +1,130 @@
-import { View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Dimensions } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+  Dimensions,
+  Animated,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { storage } from '@/lib/storage';
-import { clientStorage } from '@/lib/clientStorage';
 import { preferenceService } from '@/lib/preferenceService';
+import { theme } from '@/styles/theme';
+import { typography } from '@/styles/typography';
 
+let Haptics: typeof import('expo-haptics') | null = null;
+try { Haptics = require('expo-haptics'); } catch {}
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// 4-col grid: 24px padding × 2 sides + 8px gap × 3 = 48+24 = 72px overhead
+const CHIP_SIZE = Math.floor((SCREEN_WIDTH - 72) / 4);
+
+// ── Data ──────────────────────────────────────────────────────────────────────
 const styleOptions = [
-  { id: 'minimalist', label: 'Minimalist' },
-  { id: 'bohemian', label: 'Bohemian' },
-  { id: 'casual', label: 'Casual' },
-  { id: 'romantic', label: 'Romantic' },
-  { id: 'edgy', label: 'Edgy' },
-  { id: 'classic', label: 'Classic' },
-  { id: 'streetwear', label: 'Streetwear' },
-  { id: 'elegant', label: 'Elegant' },
-];
+  { id: 'minimalist', label: 'Minimal',    icon: 'remove-outline'      },
+  { id: 'bohemian',   label: 'Boho',       icon: 'leaf-outline'        },
+  { id: 'casual',     label: 'Casual',     icon: 'sunny-outline'       },
+  { id: 'romantic',   label: 'Romantic',   icon: 'heart-outline'       },
+  { id: 'edgy',       label: 'Edgy',       icon: 'flash-outline'       },
+  { id: 'classic',    label: 'Classic',    icon: 'ribbon-outline'      },
+  { id: 'streetwear', label: 'Street',     icon: 'layers-outline'      },
+  { id: 'elegant',    label: 'Elegant',    icon: 'sparkles-outline'    },
+] as const;
 
 const colorOptions = [
-  { id: 'black', label: 'Black', color: '#000000' },
-  { id: 'white', label: 'White', color: '#FFFFFF' },
-  { id: 'blue', label: 'Blue', color: '#3B82F6' },
-  { id: 'pink', label: 'Pink', color: '#EC4899' },
-  { id: 'red', label: 'Red', color: '#EF4444' },
-  { id: 'green', label: 'Green', color: '#10B981' },
-  { id: 'beige', label: 'Beige', color: '#D4C5B9' },
-  { id: 'grey', label: 'Grey', color: '#6B7280' },
-];
+  { id: 'black',   label: 'Black',   hex: '#111111', border: '#555' },
+  { id: 'white',   label: 'White',   hex: '#FFFFFF', border: '#DDD' },
+  { id: 'navy',    label: 'Navy',    hex: '#1E3A5F', border: '#1E3A5F' },
+  { id: 'pink',    label: 'Pink',    hex: '#F472B6', border: '#F472B6' },
+  { id: 'red',     label: 'Red',     hex: '#EF4444', border: '#EF4444' },
+  { id: 'green',   label: 'Green',   hex: '#10B981', border: '#10B981' },
+  { id: 'beige',   label: 'Beige',   hex: '#D4C5B0', border: '#B8A898' },
+  { id: 'grey',    label: 'Grey',    hex: '#9CA3AF', border: '#9CA3AF' },
+  { id: 'brown',   label: 'Brown',   hex: '#92400E', border: '#92400E' },
+  { id: 'purple',  label: 'Purple',  hex: '#8B5CF6', border: '#8B5CF6' },
+  { id: 'yellow',  label: 'Yellow',  hex: '#FBBF24', border: '#FBBF24' },
+  { id: 'teal',    label: 'Teal',    hex: '#208B84', border: '#208B84' },
+] as const;
 
 const patternOptions = [
-  { id: 'solids', label: 'Solids' },
-  { id: 'florals', label: 'Florals' },
-  { id: 'stripes', label: 'Stripes' },
-  { id: 'geometric', label: 'Geometric' },
-  { id: 'abstract', label: 'Abstract' },
-];
+  { id: 'solids',    label: 'Solids',    desc: 'Clean, one-tone' },
+  { id: 'florals',   label: 'Florals',   desc: 'Botanical prints' },
+  { id: 'stripes',   label: 'Stripes',   desc: 'Lines & pinstripes' },
+  { id: 'geometric', label: 'Geometric', desc: 'Shapes & repeats' },
+  { id: 'abstract',  label: 'Abstract',  desc: 'Artistic, freeform' },
+  { id: 'animal',    label: 'Animal',    desc: 'Leopard, zebra & co.' },
+] as const;
 
+interface ColorOption   { id: string; label: string; hex: string; border: string }
+interface PatternOption { id: string; label: string; desc: string }
+
+// ── Screen ────────────────────────────────────────────────────────────────────
 export default function StyleQuizScreen() {
   const router = useRouter();
   const [step, setStep] = useState(1);
-  const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
-  const [selectedColors, setSelectedColors] = useState<string[]>([]);
+  const [selectedStyles,   setSelectedStyles]   = useState<string[]>([]);
+  const [selectedColors,   setSelectedColors]   = useState<string[]>([]);
   const [selectedPatterns, setSelectedPatterns] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  
-  const screenWidth = Dimensions.get('window').width;
-  const pillWidth = (screenWidth - 72) / 2; // screen width - padding (20*2) - gap (12) / 2 columns
 
-  const toggleSelection = (item: string, list: string[], setter: Function) => {
-    if (list.includes(item)) {
-      setter(list.filter((i) => i !== item));
+  const progressAnim = useRef(new Animated.Value(0.5)).current;
+
+  useEffect(() => {
+    Animated.timing(progressAnim, {
+      toValue: step === 1 ? 0.5 : 1,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+  }, [step]);
+
+  const toggle = (id: string, list: string[], setList: (v: string[]) => void) => {
+    Haptics?.selectionAsync().catch(() => {});
+    setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+  };
+
+  const handleContinue = () => {
+    if (step === 1) {
+      if (selectedStyles.length < 3) {
+        Alert.alert('Pick a few more', 'Select at least 3 styles to continue.');
+        return;
+      }
+      setStep(2);
     } else {
-      setter([...list, item]);
+      handleComplete();
     }
   };
 
   const handleComplete = async () => {
-    if (selectedStyles.length < 3) {
-      Alert.alert('Please select at least 3 styles');
-      return;
-    }
-
     try {
       setLoading(true);
-
       const { data: { user } } = await supabase.auth.getUser();
-
       if (!user) throw new Error('No user found');
 
       const { error: prefError } = await supabase
         .from('user_preferences')
-        .upsert({
-          user_id: user.id,
-          style_tags: selectedStyles,
-          favorite_colors: selectedColors,
-          pattern_preferences: selectedPatterns,
-          // quiz_skipped: false — add column in Supabase first (see supabase/migrations)
-        }, {
-          onConflict: 'user_id',
-        });
-
+        .upsert(
+          { user_id: user.id, style_tags: selectedStyles, favorite_colors: selectedColors, pattern_preferences: selectedPatterns },
+          { onConflict: 'user_id' }
+        );
       if (prefError) throw prefError;
 
-      const { error: userError } = await supabase
+      await supabase
         .from('users')
         .update({ style_quiz_completed: true, onboarding_completed: true })
         .eq('id', user.id);
 
-      if (userError) throw userError;
-
       await storage.setStyleQuizCompleted(true);
-
-      // Reset style counters + feed cache so personalization uses fresh quiz data
       await preferenceService.resetLearnedPreferences(user.id);
-
-      // Navigate immediately, feed shows skeleton while loading
       router.replace('/(tabs)');
-    } catch (error: any) {
-      Alert.alert('Error', error.message);
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
     } finally {
       setLoading(false);
     }
@@ -107,287 +133,150 @@ export default function StyleQuizScreen() {
   const handleSkip = async () => {
     try {
       setLoading(true);
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No user found');
-
-      // Create preferences row with all fields null (skip state stored locally; add quiz_skipped column in Supabase to persist)
-      const { error: prefError } = await supabase
-        .from('user_preferences')
-        .upsert({
-          user_id: user.id,
-          style_tags: [],
-          favorite_colors: [],
-          pattern_preferences: [],
-          // quiz_skipped: true — add column in Supabase first (see supabase/migrations)
-        }, {
-          onConflict: 'user_id',
-        });
-
-      if (prefError) throw prefError;
-
-      const { error: userError } = await supabase
-        .from('users')
-        .update({ onboarding_completed: true })
-        .eq('id', user.id);
-
-      if (userError) throw userError;
-
+      await supabase.from('user_preferences').upsert(
+        { user_id: user.id, style_tags: [], favorite_colors: [], pattern_preferences: [] },
+        { onConflict: 'user_id' }
+      );
+      await supabase.from('users').update({ onboarding_completed: true }).eq('id', user.id);
       await storage.setStyleQuizCompleted(true);
       router.replace('/(tabs)');
-    } catch (error: any) {
-      Alert.alert('Error', error.message);
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const renderStep = () => {
-    switch (step) {
-      case 1:
-        return (
-          <View className="items-center w-full">
-            <Text className="text-2xl font-serif-bold text-neutral-900 mb-2 text-center">
-              Pick your styles
-            </Text>
-            <Text className="text-sm text-neutral-600 mb-8 text-center px-4 leading-5">
-              Choose at least 3 that resonate with you
-            </Text>
-
-            <View className="w-full mb-6">
-              <View className="flex-row flex-wrap gap-3">
-                {styleOptions.map((style) => (
-                  <TouchableOpacity
-                    key={style.id}
-                    onPress={() => toggleSelection(style.id, selectedStyles, setSelectedStyles)}
-                    className={`py-3.5 rounded-full border-2 items-center justify-center ${
-                      selectedStyles.includes(style.id)
-                        ? 'border-primary-500 bg-primary-50'
-                        : 'border-neutral-200 bg-white'
-                    }`}
-                    style={{
-                      width: pillWidth,
-                      shadowColor: selectedStyles.includes(style.id) ? '#208B84' : '#000',
-                      shadowOffset: { width: 0, height: selectedStyles.includes(style.id) ? 2 : 1 },
-                      shadowOpacity: selectedStyles.includes(style.id) ? 0.1 : 0.05,
-                      shadowRadius: selectedStyles.includes(style.id) ? 4 : 2,
-                      elevation: selectedStyles.includes(style.id) ? 3 : 1,
-                    }}
-                  >
-                    <Text
-                      className={`text-base ${
-                        selectedStyles.includes(style.id)
-                          ? 'text-primary-500 font-sans-semibold'
-                          : 'text-neutral-700 font-sans-medium'
-                      }`}
-                      numberOfLines={1}
-                    >
-                      {style.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View className="bg-neutral-50 rounded-xl px-4 py-2.5">
-              <Text className={`text-sm font-sans-medium ${
-                selectedStyles.length >= 3 ? 'text-primary-500' : 'text-neutral-600'
-              }`}>
-                {selectedStyles.length}/3 selected
-              </Text>
-            </View>
-          </View>
-        );
-
-      case 2:
-        const colorWidth = (screenWidth - 72 - 18) / 4; // 4 columns: padding (24*2) + gaps (12*3) = 72 + 18
-        return (
-          <View className="w-full">
-            {/* Color Palette Section */}
-            <View className="w-full mb-12">
-              <Text className="text-2xl font-serif-bold text-neutral-900 mb-2 text-center">
-                Your color palette
-              </Text>
-              <Text className="text-sm text-neutral-600 mb-8 text-center px-4 leading-5">
-                Tap colors you're drawn to
-              </Text>
-
-              <View className="flex-row flex-wrap gap-3 w-full">
-                {colorOptions.map((color) => {
-                  const isSelected = selectedColors.includes(color.id);
-                  return (
-                    <TouchableOpacity
-                      key={color.id}
-                      onPress={() => toggleSelection(color.id, selectedColors, setSelectedColors)}
-                      className="items-center"
-                      style={{
-                        width: colorWidth,
-                      }}
-                    >
-                      <View
-                        className={`rounded-full mb-2.5 ${
-                          isSelected ? 'border-4 border-primary-500' : 'border-2 border-neutral-200'
-                        }`}
-                        style={{
-                          width: colorWidth - 4,
-                          height: colorWidth - 4,
-                          backgroundColor: color.color,
-                          shadowColor: isSelected ? '#208B84' : '#000',
-                          shadowOffset: { width: 0, height: isSelected ? 4 : 2 },
-                          shadowOpacity: isSelected ? 0.2 : 0.1,
-                          shadowRadius: isSelected ? 6 : 3,
-                          elevation: isSelected ? 4 : 2,
-                        }}
-                      />
-                      <Text 
-                        className={`text-xs font-sans-medium ${
-                          isSelected ? 'text-primary-500' : 'text-neutral-700'
-                        }`}
-                        numberOfLines={1}
-                      >
-                        {color.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            {/* Divider */}
-            <View className="h-px bg-neutral-200 mb-10 w-full" />
-
-            {/* Pattern Preferences Section */}
-            <View className="w-full">
-              <Text className="text-2xl font-serif-bold text-neutral-900 mb-6 text-center">
-                Pattern preferences
-              </Text>
-              <View className="flex-row flex-wrap gap-3 w-full">
-                {patternOptions.map((pattern) => (
-                  <TouchableOpacity
-                    key={pattern.id}
-                    onPress={() =>
-                      toggleSelection(pattern.id, selectedPatterns, setSelectedPatterns)
-                    }
-                    className={`py-3.5 rounded-full border-2 items-center justify-center ${
-                      selectedPatterns.includes(pattern.id)
-                        ? 'border-primary-500 bg-primary-50'
-                        : 'border-neutral-200 bg-white'
-                    }`}
-                    style={{
-                      width: pillWidth,
-                      shadowColor: selectedPatterns.includes(pattern.id) ? '#208B84' : '#000',
-                      shadowOffset: { width: 0, height: selectedPatterns.includes(pattern.id) ? 2 : 1 },
-                      shadowOpacity: selectedPatterns.includes(pattern.id) ? 0.1 : 0.05,
-                      shadowRadius: selectedPatterns.includes(pattern.id) ? 4 : 2,
-                      elevation: selectedPatterns.includes(pattern.id) ? 3 : 1,
-                    }}
-                  >
-                    <Text
-                      className={`text-base ${
-                        selectedPatterns.includes(pattern.id)
-                          ? 'text-primary-500 font-sans-semibold'
-                          : 'text-neutral-700 font-sans-medium'
-                      }`}
-                      numberOfLines={1}
-                    >
-                      {pattern.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          </View>
-        );
-
-      default:
-        return null;
-    }
-  };
+  const progressWidth = progressAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0%', '100%'],
+  });
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
-      <View className="flex-1 justify-between pt-12 px-6 pb-6">
-        {/* Header */}
-        <View className="items-center mb-6">
-          <Text className="text-5xl font-serif text-primary-500 text-center mb-3">
-            Wardro8e
-          </Text>
-          
-          {/* Progress Indicator */}
-          <View className="flex-row gap-2 mb-6 w-full max-w-xs">
-            <View className={`flex-1 h-1.5 rounded-full ${step >= 1 ? 'bg-primary-500' : 'bg-neutral-200'}`} />
-            <View className={`flex-1 h-1.5 rounded-full ${step >= 2 ? 'bg-primary-500' : 'bg-neutral-200'}`} />
-          </View>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+      <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 16 }}>
 
-          <Text className="text-xl font-serif-bold text-neutral-900 text-center mb-2">
-            Let's find your style
-          </Text>
-          <Text className="text-sm text-neutral-600 text-center px-4 leading-5">
-            Answer 2 quick questions for personalized recommendations
-          </Text>
+        {/* Progress bar */}
+        <View style={{ height: 2, backgroundColor: theme.colors.neutral[100], borderRadius: 1, marginBottom: 28 }}>
+          <Animated.View
+            style={{ height: '100%', width: progressWidth, backgroundColor: theme.colors.primary[500], borderRadius: 1 }}
+          />
         </View>
 
-        {/* Content - Centered with Scroll */}
-        <View className="flex-1 justify-center w-full max-w-2xl mx-auto">
-          <ScrollView 
-            className="flex-1" 
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingVertical: 20, paddingHorizontal: 4 }}
-          >
-            {renderStep()}
+        {/* Title */}
+        <Text
+          style={{
+            fontFamily: typography.fontFamily.serif.bold,
+            fontSize: 26,
+            color: theme.colors.neutral[900],
+            lineHeight: 32,
+            marginBottom: 4,
+          }}
+        >
+          {step === 1 ? 'Your style,\nyour rules.' : 'Colour & patterns.'}
+        </Text>
+        <Text
+          style={{
+            fontFamily: typography.fontFamily.sans.regular,
+            fontSize: 13,
+            color: theme.colors.neutral[400],
+            marginBottom: 24,
+          }}
+        >
+          {step === 1 ? 'Pick 3+ aesthetics that speak to you.' : 'Tap anything that draws your eye.'}
+        </Text>
+
+        {/* Content */}
+        {step === 1 ? (
+          /* ── Step 1: 4-col chip grid ── */
+          <StyleChipGrid
+            options={styleOptions}
+            selected={selectedStyles}
+            onToggle={(id) => toggle(id, selectedStyles, setSelectedStyles)}
+          />
+        ) : (
+          /* ── Step 2: Colors + Patterns (scrollable) ── */
+          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }}>
+            <ColorGrid
+              options={colorOptions}
+              selected={selectedColors}
+              onToggle={(id) => toggle(id, selectedColors, setSelectedColors)}
+            />
+            <View style={{ height: 1, backgroundColor: theme.colors.neutral[100], marginVertical: 22 }} />
+            <PatternList
+              options={patternOptions}
+              selected={selectedPatterns}
+              onToggle={(id) => toggle(id, selectedPatterns, setSelectedPatterns)}
+            />
           </ScrollView>
-        </View>
+        )}
 
-        {/* Bottom Actions */}
-        <View className="pt-6">
-          <View className="flex-row gap-3">
-            {step > 1 && (
+        {/* Spacer */}
+        <View style={{ flex: 1 }} />
+
+        {/* Bottom actions */}
+        <View style={{ paddingBottom: 8, paddingTop: 12 }}>
+          {/* Counter hint — step 1 */}
+          {step === 1 && (
+            <Text
+              style={{
+                fontFamily: typography.fontFamily.sans.medium,
+                fontSize: 12,
+                color: selectedStyles.length >= 3 ? theme.colors.primary[500] : theme.colors.neutral[400],
+                textAlign: 'center',
+                marginBottom: 10,
+              }}
+            >
+              {selectedStyles.length < 3
+                ? `${selectedStyles.length}/3 selected`
+                : `${selectedStyles.length} selected ✓`}
+            </Text>
+          )}
+
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            {step === 2 && (
               <TouchableOpacity
-                onPress={() => setStep(step - 1)}
-                className="w-12 h-12 border border-neutral-200 rounded-xl items-center justify-center bg-white"
+                onPress={() => setStep(1)}
                 style={{
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 1 },
-                  shadowOpacity: 0.05,
-                  shadowRadius: 2,
-                  elevation: 1,
+                  width: 50, height: 50, borderRadius: 12,
+                  borderWidth: 1, borderColor: theme.colors.neutral[200],
+                  alignItems: 'center', justifyContent: 'center',
                 }}
+                activeOpacity={0.7}
               >
-                <Text className="text-neutral-700 text-lg font-bold pb-2">←</Text>
+                <Ionicons name="arrow-back" size={18} color={theme.colors.neutral[600]} />
               </TouchableOpacity>
             )}
 
             <TouchableOpacity
-              onPress={() => (step < 2 ? setStep(step + 1) : handleComplete())}
+              onPress={handleContinue}
               disabled={(step === 1 && selectedStyles.length < 3) || loading}
-              className={`${step > 1 ? 'flex-1' : 'w-full'} bg-primary-500 rounded-xl h-12 items-center justify-center ${
-                (step === 1 && selectedStyles.length < 3) || loading ? 'opacity-50' : ''
-              }`}
+              activeOpacity={0.85}
               style={{
-                shadowColor: (step === 1 && selectedStyles.length < 3) || loading ? 'transparent' : '#208B84',
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.2,
-                shadowRadius: 8,
-                elevation: (step === 1 && selectedStyles.length < 3) || loading ? 0 : 4,
+                flex: 1, height: 50, borderRadius: 12,
+                backgroundColor: theme.colors.primary[600],
+                alignItems: 'center', justifyContent: 'center',
+                opacity: (step === 1 && selectedStyles.length < 3) || loading ? 0.4 : 1,
               }}
             >
-              {loading ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text className="text-white text-sm font-sans-semibold">
-                  {step === 2 ? 'Complete' : 'Continue'}
-                </Text>
-              )}
+              {loading
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 14, color: '#fff' }}>
+                    {step === 2 ? 'Done' : 'Continue'}
+                  </Text>
+              }
             </TouchableOpacity>
           </View>
 
           <TouchableOpacity
             onPress={handleSkip}
             disabled={loading}
-            className="mt-3 py-3 items-center"
-            activeOpacity={0.7}
+            style={{ paddingVertical: 14, alignItems: 'center' }}
+            activeOpacity={0.6}
           >
-            <Text className="text-neutral-500 text-sm font-sans-medium">
+            <Text style={{ fontFamily: typography.fontFamily.sans.regular, fontSize: 13, color: theme.colors.neutral[400] }}>
               Skip for now
             </Text>
           </TouchableOpacity>
@@ -397,3 +286,234 @@ export default function StyleQuizScreen() {
   );
 }
 
+// ── Style chips: 4-col compact grid ───────────────────────────────────────────
+function StyleChipGrid({
+  options, selected, onToggle,
+}: {
+  options: typeof styleOptions;
+  selected: string[];
+  onToggle: (id: string) => void;
+}) {
+  // Pair into rows of 4
+  const rows: (typeof styleOptions[number])[][] = [];
+  for (let i = 0; i < options.length; i += 4) {
+    rows.push(Array.from(options).slice(i, i + 4));
+  }
+
+  return (
+    <View style={{ gap: 8 }}>
+      {rows.map((row, ri) => (
+        <View key={ri} style={{ flexDirection: 'row', gap: 8 }}>
+          {row.map((s) => (
+            <StyleChip
+              key={s.id}
+              item={s}
+              selected={selected.includes(s.id)}
+              onPress={() => onToggle(s.id)}
+            />
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function StyleChip({
+  item, selected, onPress,
+}: {
+  item: typeof styleOptions[number];
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const handlePress = () => {
+    Animated.sequence([
+      Animated.timing(scaleAnim, { toValue: 0.9, duration: 70, useNativeDriver: true }),
+      Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true }),
+    ]).start();
+    onPress();
+  };
+
+  return (
+    <Animated.View style={{ transform: [{ scale: scaleAnim }], flex: 1 }}>
+      <TouchableOpacity
+        onPress={handlePress}
+        activeOpacity={0.85}
+        style={{
+          height: CHIP_SIZE + 4,
+          borderRadius: 14,
+          borderWidth: 1.5,
+          borderColor: selected ? theme.colors.primary[500] : theme.colors.neutral[200],
+          backgroundColor: selected ? theme.colors.primary[50] : '#FAFAFA',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 6,
+          paddingVertical: 8,
+        }}
+      >
+        {/* Icon circle */}
+        <View
+          style={{
+            width: 34, height: 34, borderRadius: 17,
+            backgroundColor: selected ? theme.colors.primary[100] : theme.colors.neutral[100],
+            alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <Ionicons
+            name={item.icon as any}
+            size={17}
+            color={selected ? theme.colors.primary[600] : theme.colors.neutral[500]}
+          />
+        </View>
+        <Text
+          style={{
+            fontFamily: typography.fontFamily.sans.medium,
+            fontSize: 11,
+            color: selected ? theme.colors.primary[700] : theme.colors.neutral[600],
+            textAlign: 'center',
+          }}
+          numberOfLines={1}
+        >
+          {item.label}
+        </Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+// ── Colour grid: 4 cols ────────────────────────────────────────────────────────
+function ColorGrid({
+  options, selected, onToggle,
+}: {
+  options: readonly ColorOption[];
+  selected: string[];
+  onToggle: (id: string) => void;
+}) {
+  const DOT = Math.floor((SCREEN_WIDTH - 72) / 4); // same as chip width
+
+  return (
+    <>
+      <Text style={{
+        fontFamily: typography.fontFamily.sans.semibold,
+        fontSize: 11, color: theme.colors.neutral[400],
+        letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 14,
+      }}>
+        Colours
+      </Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {options.map((c) => {
+          const on = selected.includes(c.id);
+          return (
+            <TouchableOpacity
+              key={c.id}
+              onPress={() => onToggle(c.id)}
+              activeOpacity={0.8}
+              style={{ width: DOT, alignItems: 'center', gap: 5 }}
+            >
+              <View
+                style={{
+                  width: DOT - 2, height: DOT - 2,
+                  borderRadius: (DOT - 2) / 2,
+                  backgroundColor: c.hex,
+                  borderWidth: on ? 2.5 : 1.5,
+                  borderColor: on ? theme.colors.primary[500] : c.border,
+                  alignItems: 'center', justifyContent: 'center',
+                  shadowColor: on ? theme.colors.primary[500] : '#000',
+                  shadowOffset: { width: 0, height: on ? 2 : 1 },
+                  shadowOpacity: on ? 0.25 : 0.06,
+                  shadowRadius: on ? 4 : 2,
+                  elevation: on ? 4 : 1,
+                }}
+              >
+                {on && (
+                  <View style={{
+                    width: 14, height: 14, borderRadius: 7,
+                    backgroundColor: 'rgba(255,255,255,0.92)',
+                    alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <Ionicons name="checkmark" size={9} color={theme.colors.primary[600]} />
+                  </View>
+                )}
+              </View>
+              <Text style={{
+                fontFamily: typography.fontFamily.sans.medium,
+                fontSize: 10,
+                color: on ? theme.colors.primary[600] : theme.colors.neutral[500],
+                textAlign: 'center',
+              }} numberOfLines={1}>
+                {c.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </>
+  );
+}
+
+// ── Pattern list: clean rows ───────────────────────────────────────────────────
+function PatternList({
+  options, selected, onToggle,
+}: {
+  options: readonly PatternOption[];
+  selected: string[];
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <>
+      <Text style={{
+        fontFamily: typography.fontFamily.sans.semibold,
+        fontSize: 11, color: theme.colors.neutral[400],
+        letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 12,
+      }}>
+        Patterns
+      </Text>
+      <View style={{ gap: 8 }}>
+        {options.map((p) => {
+          const on = selected.includes(p.id);
+          return (
+            <TouchableOpacity
+              key={p.id}
+              onPress={() => onToggle(p.id)}
+              activeOpacity={0.75}
+              style={{
+                flexDirection: 'row', alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingHorizontal: 14, paddingVertical: 12,
+                borderRadius: 12,
+                borderWidth: 1.5,
+                borderColor: on ? theme.colors.primary[400] : theme.colors.neutral[200],
+                backgroundColor: on ? theme.colors.primary[50] : '#FAFAFA',
+              }}
+            >
+              <View>
+                <Text style={{
+                  fontFamily: typography.fontFamily.sans.semibold, fontSize: 14,
+                  color: on ? theme.colors.primary[700] : theme.colors.neutral[800],
+                }}>
+                  {p.label}
+                </Text>
+                <Text style={{
+                  fontFamily: typography.fontFamily.sans.regular, fontSize: 12,
+                  color: theme.colors.neutral[400], marginTop: 1,
+                }}>
+                  {p.desc}
+                </Text>
+              </View>
+              <View style={{
+                width: 20, height: 20, borderRadius: 10,
+                borderWidth: 1.5,
+                borderColor: on ? theme.colors.primary[500] : theme.colors.neutral[300],
+                backgroundColor: on ? theme.colors.primary[500] : 'transparent',
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                {on && <Ionicons name="checkmark" size={12} color="#fff" />}
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </>
+  );
+}

@@ -7,6 +7,7 @@ import { Product, FeedType, FeedOptions, UserPreferences } from '../types';
 const DEFAULT_LIMIT = 20;
 const PYTHON_SERVICE_URL = process.env.EXPO_PUBLIC_PYTHON_SERVICE_URL || '';
 const FEED_TIMEOUT_MS = 10000;
+const EXPLORE_TIMEOUT_MS = 8000;
 
 function normalizeProductGender(g: string | undefined | null): 'men' | 'women' | 'unisex' {
   if (g == null || !String(g).trim()) return 'unisex';
@@ -163,6 +164,172 @@ async function callPythonPersonalizedFeed(
   }
 }
 
+// ── Explore & Trending helpers ────────────────────────────────────────────────
+
+export interface ExploreFeedOptions {
+  limit?: number;
+  offset?: number;
+  excludeIds?: string[];
+  gender?: string | null;
+  vibe?: string | null;   // Style tag filter
+}
+
+/** Diverse explore feed with category/brand diversity + serendipity. Local fallback. */
+async function getLocalExploreFeed(options: ExploreFeedOptions): Promise<Product[]> {
+  const { limit = 30, offset = 0, excludeIds = [], gender, vibe } = options;
+
+  let fetched = await getProducts({
+    limit: 300,
+    offset: 0,
+    gender: gender ?? undefined,
+    orderBy: ['is_featured', 'created_at'],
+    orderAsc: [false, false],
+  });
+
+  // Vibe / style filter — soft blend if not enough matches
+  if (vibe && vibe !== 'All') {
+    const vibeLower = vibe.toLowerCase();
+    const vibeMatched = fetched.filter((p) =>
+      p.style?.some((s) => s.toLowerCase() === vibeLower)
+    );
+    if (vibeMatched.length >= limit) {
+      fetched = vibeMatched;
+    } else if (vibeMatched.length >= 5) {
+      const vibeIds = new Set(vibeMatched.map((p) => p.id));
+      const others = fetched.filter((p) => !vibeIds.has(p.id));
+      fetched = [...vibeMatched, ...others.slice(0, vibeMatched.length * 3)];
+    }
+  }
+
+  // Exclude already-seen
+  const excludeSet = new Set(excludeIds);
+  fetched = fetched.filter((p) => !excludeSet.has(p.id));
+
+  // Score: featured + serendipity noise
+  // Low featured bonus (0.6) — trending strip handles featured items.
+  // Serendipity noise (1.8) is the dominant driver for grid variety.
+  const scored = fetched.map((p) => ({
+    product: p,
+    score:
+      (p.is_featured ? 0.6 : 0) +
+      Math.min((p.click_count ?? 0) * 0.12, 1.5) +
+      Math.random() * 1.8,
+  }));
+  scored.sort((a, b) => b.score - a.score);
+
+  // Category + brand diversity
+  const catCount: Record<string, number> = {};
+  const brandCount: Record<string, number> = {};
+  const diverse: Product[] = [];
+  const needed = limit + offset;
+
+  for (const { product } of scored) {
+    const cat = product.category || 'unknown';
+    const brand = product.source_brand_name || 'unknown';
+    catCount[cat] = (catCount[cat] || 0) + 1;
+    brandCount[brand] = (brandCount[brand] || 0) + 1;
+    if (catCount[cat] <= 4 && brandCount[brand] <= 3) {
+      diverse.push(product);
+    }
+    if (diverse.length >= needed) break;
+  }
+
+  return diverse.slice(offset, offset + limit);
+}
+
+export const exploreService = {
+  /**
+   * Fetch a diverse explore feed.
+   * Tries the Python /explore-feed endpoint first; falls back to local scoring.
+   */
+  async getExploreFeed(options: ExploreFeedOptions = {}): Promise<Product[]> {
+    const { limit = 30, offset = 0, excludeIds = [], gender, vibe } = options;
+
+    if (PYTHON_SERVICE_URL) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), EXPLORE_TIMEOUT_MS);
+
+        const response = await fetch(`${PYTHON_SERVICE_URL}/explore-feed`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            limit,
+            offset,
+            exclude_ids: excludeIds.slice(0, 200),
+            gender: gender ?? null,
+            vibe: vibe ?? null,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data) && data.length > 0) {
+            return data.map(mapPythonProduct);
+          }
+        }
+      } catch {
+        if (__DEV__) console.log('[exploreService] Python service unavailable, using local fallback');
+      }
+    }
+
+    return getLocalExploreFeed(options);
+  },
+
+  /**
+   * Fetch trending products for the trending strip.
+   * Tries Python /trending; falls back to Supabase featured + click_count query.
+   */
+  async getTrendingProducts(gender?: string | null, limit = 12): Promise<Product[]> {
+    if (PYTHON_SERVICE_URL) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), EXPLORE_TIMEOUT_MS);
+
+        const response = await fetch(`${PYTHON_SERVICE_URL}/trending`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit, gender: gender ?? null }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data) && data.length > 0) {
+            return data.map(mapPythonProduct);
+          }
+        }
+      } catch {
+        if (__DEV__) console.log('[exploreService] Trending fallback to local');
+      }
+    }
+
+    // Local fallback: featured first, then by click_count
+    const fetched = await getProducts({
+      limit: 80,
+      gender: gender ?? undefined,
+      orderBy: ['is_featured', 'created_at'],
+      orderAsc: [false, false],
+    });
+
+    // Brand diversity: max 2 per brand
+    const brandCount: Record<string, number> = {};
+    const result: Product[] = [];
+    for (const p of fetched) {
+      const brand = p.source_brand_name || 'unknown';
+      brandCount[brand] = (brandCount[brand] || 0) + 1;
+      if (brandCount[brand] <= 2) result.push(p);
+      if (result.length >= limit) break;
+    }
+    return result;
+  },
+};
+
+// ── Main feed service ─────────────────────────────────────────────────────────
+
 export const feedService = {
   async determineFeedType(userId: string | null): Promise<FeedType> {
     if (!userId) return 'cold_start';
@@ -240,6 +407,17 @@ export const feedService = {
 
     let products = applyExcludeFilter(fetched, excludeIds);
     products = applyBrandDiversityCap(products);
+
+    // Shuffle non-featured products so cold-start users don't see the same
+    // "newest" items on every session. Featured products still surface first.
+    const featured = products.filter((p) => p.is_featured);
+    const rest = products.filter((p) => !p.is_featured);
+    for (let i = rest.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [rest[i], rest[j]] = [rest[j], rest[i]];
+    }
+    products = [...featured, ...rest];
+
     const page = paginate(products, limit, offset);
     if (page.length === 0 && offset === 0) {
       return this.getUnfilteredFallbackFeed({ limit, offset, gender });
@@ -284,7 +462,8 @@ export const feedService = {
 
     const scored = fetched.map((p) => ({
       product: p,
-      score: scoreByPreferences(p, prefs) + Math.random() * 0.5,
+      // Stronger noise (1.0) so preferences guide but don't lock in the same order
+      score: scoreByPreferences(p, prefs) + Math.random() * 1.0,
     }));
 
     scored.sort((a, b) => b.score - a.score);
@@ -362,7 +541,8 @@ export const feedService = {
         prefScore = scoreByPreferences(candidate, prefs);
       }
 
-      const totalScore = 0.7 * behavioralScore + 0.3 * prefScore + Math.random() * 0.3;
+      // Noise at 1.0: relevant products stay near top but order varies per session
+      const totalScore = 0.7 * behavioralScore + 0.3 * prefScore + Math.random() * 1.0;
       return { product: candidate, score: totalScore };
     });
 
