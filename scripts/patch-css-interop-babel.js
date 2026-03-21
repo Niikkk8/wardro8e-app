@@ -4,10 +4,8 @@
  *
  * NativeWind v4 uses react-native-css-interop which unconditionally
  * loads react-native-worklets/plugin. That plugin requires New Architecture,
- * which breaks the build when newArchEnabled=false. Since this project
- * doesn't use CSS transitions/animations (the only feature worklets enables
- * in NativeWind), it's safe to skip loading the plugin when the package
- * isn't installed.
+ * which breaks builds when newArchEnabled=false. This rewrites the file
+ * to only include the plugin when the package is actually installed.
  *
  * Run as part of eas-build-post-install.
  */
@@ -28,20 +26,35 @@ if (!fs.existsSync(babelFile)) {
   process.exit(0);
 }
 
-let content = fs.readFileSync(babelFile, 'utf8');
+const patched = `module.exports = function () {
+  var plugins = [
+    require("./dist/babel-plugin").default,
+    [
+      "@babel/plugin-transform-react-jsx",
+      {
+        runtime: "automatic",
+        importSource: "react-native-css-interop",
+      },
+    ],
+  ];
+  // Only load worklets plugin if the package is installed (requires New Architecture).
+  // Skipping it disables CSS transition/animation utilities but leaves all other
+  // Tailwind classes working normally.
+  try {
+    require.resolve("react-native-worklets/plugin");
+    plugins.push("react-native-worklets/plugin");
+  } catch (e) {
+    // react-native-worklets not installed — skip
+  }
+  return { plugins: plugins };
+};
+`;
 
-const hardcoded = '"react-native-worklets/plugin",';
-const optional = `(() => {
-        try { return require.resolve("react-native-worklets/plugin") && "react-native-worklets/plugin"; }
-        catch (e) { return null; }
-      })(),`;
+const current = fs.readFileSync(babelFile, 'utf8');
 
-if (content.includes(hardcoded) && !content.includes('try { return require.resolve')) {
-  content = content.replace(hardcoded, optional);
-  fs.writeFileSync(babelFile, content);
-  console.log('[patch-css-interop-babel] Patched react-native-worklets/plugin to be optional');
-} else if (content.includes('try { return require.resolve')) {
+if (current.trim() === patched.trim()) {
   console.log('[patch-css-interop-babel] Already patched');
 } else {
-  console.log('[patch-css-interop-babel] react-native-worklets/plugin line not found — nothing to patch');
+  fs.writeFileSync(babelFile, patched);
+  console.log('[patch-css-interop-babel] Patched react-native-worklets/plugin to be optional');
 }
