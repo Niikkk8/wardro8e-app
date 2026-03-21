@@ -185,13 +185,13 @@ export default function HomePage() {
   };
 
   return (
-    <SafeAreaView edges={['top']} className="flex-1 bg-white">
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: '#f8f8f8' }}>
       {/* Top Navbar */}
       <View
         className="flex-row items-center justify-between px-4 py-3 border-b"
         style={{
           borderBottomColor: theme.colors.neutral[200],
-          backgroundColor: '#FFFFFF',
+          backgroundColor: '#f8f8f8',
         }}
       >
         <Text

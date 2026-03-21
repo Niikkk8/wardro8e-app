@@ -1,27 +1,11 @@
-import React, { useState, useCallback } from 'react';
-import {
-  View,
-  Image,
-  TouchableOpacity,
-  Dimensions,
-  Text,
-  Animated,
-  Platform,
-} from 'react-native';
+import React from 'react';
+import { View, Text, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../../styles/theme';
-import { typography } from '../../styles/typography';
 import { Product } from '../../types';
+import ProductCard from '../ui/ProductCard';
 
-let LinearGradient: any = null;
-try {
-  LinearGradient = require('expo-linear-gradient').LinearGradient;
-} catch {}
-
-let Haptics: typeof import('expo-haptics') | null = null;
-try { Haptics = require('expo-haptics'); } catch {}
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = require('react-native').Dimensions.get('window');
 const COLUMN_COUNT = 2;
 const GAP = theme.spacing.md;
 const COLUMN_WIDTH = (SCREEN_WIDTH - theme.spacing.lg * 2 - GAP) / COLUMN_COUNT;
@@ -90,12 +74,12 @@ export default function MasonryLayout({
       {columns.map((column, columnIndex) => (
         <View key={columnIndex} style={{ width: COLUMN_WIDTH, gap: GAP }}>
           {column.map((product) => (
-            <MasonryItem
+            <ProductCard
               key={product.id}
               product={product}
               width={COLUMN_WIDTH}
               onPress={() => onProductPress?.(product.id)}
-              onLongPress={() => onDismiss?.(product.id)}
+              onLongPress={onDismiss ? () => onDismiss(product.id) : undefined}
               onLike={onLike ? () => onLike(product.id) : undefined}
               isLiked={likedIds?.has(product.id) ?? false}
             />
@@ -103,190 +87,6 @@ export default function MasonryLayout({
         </View>
       ))}
     </View>
-  );
-}
-
-interface MasonryItemProps {
-  product: Product;
-  width: number;
-  onPress?: () => void;
-  onLongPress?: () => void;
-  onLike?: () => void;
-  isLiked?: boolean;
-}
-
-function MasonryItem({ product, width, onPress, onLongPress, onLike, isLiked = false }: MasonryItemProps) {
-  const [imageHeight, setImageHeight] = useState<number>(width * 1.5);
-  const [imageError, setImageError] = useState(false);
-  const scaleAnim = React.useRef(new Animated.Value(1)).current;
-
-  const handleImageLoad = useCallback((event: any) => {
-    const { width: imgWidth, height: imgHeight } = event.nativeEvent.source;
-    if (imgWidth && imgHeight) {
-      const aspectRatio = imgHeight / imgWidth;
-      setImageHeight(width * aspectRatio);
-    }
-  }, [width]);
-
-  const handleLongPress = useCallback(() => {
-    Haptics?.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    // Quick scale animation for feedback
-    Animated.sequence([
-      Animated.timing(scaleAnim, { toValue: 0.95, duration: 100, useNativeDriver: true }),
-      Animated.timing(scaleAnim, { toValue: 1, duration: 100, useNativeDriver: true }),
-    ]).start();
-    onLongPress?.();
-  }, [onLongPress]);
-
-  const handleLike = useCallback(() => {
-    Haptics?.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    onLike?.();
-  }, [onLike]);
-
-  const imageUrl = product.image_urls?.[0];
-
-  if (!imageUrl || imageError) return null;
-
-  const hasDiscount = product.sale_price && product.sale_price < product.price;
-  const displayPrice = hasDiscount ? product.sale_price : product.price;
-  const discountPercent = hasDiscount
-    ? Math.round(((product.price - product.sale_price!) / product.price) * 100)
-    : 0;
-
-  return (
-    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-      <TouchableOpacity
-        activeOpacity={0.92}
-        onPress={onPress}
-        onLongPress={handleLongPress}
-        delayLongPress={450}
-        style={{
-          width,
-          borderRadius: theme.borderRadius.lg,
-          overflow: 'hidden',
-          backgroundColor: theme.colors.neutral[100],
-          ...theme.shadows.sm,
-        }}
-      >
-        <Image
-          source={{ uri: imageUrl }}
-          style={{ width: '100%', height: imageHeight, resizeMode: 'cover' }}
-          onLoad={handleImageLoad}
-          onError={() => setImageError(true)}
-        />
-
-        {/* Discount badge */}
-        {hasDiscount && (
-          <View
-            className="absolute top-2 left-2 px-2 py-0.5 rounded-full"
-            style={{ backgroundColor: theme.colors.error }}
-          >
-            <Text style={{ color: '#FFF', fontSize: 9, fontFamily: typography.fontFamily.sans.bold }}>
-              -{discountPercent}%
-            </Text>
-          </View>
-        )}
-
-        {/* Like button (top right) */}
-        {onLike && (
-          <TouchableOpacity
-            onPress={handleLike}
-            className="absolute top-2 right-2 w-8 h-8 rounded-full items-center justify-center"
-            style={{ backgroundColor: 'rgba(255,255,255,0.9)', ...theme.shadows.sm }}
-            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            activeOpacity={0.8}
-          >
-            <Ionicons
-              name={isLiked ? 'heart' : 'heart-outline'}
-              size={15}
-              color={isLiked ? theme.colors.error : theme.colors.neutral[600]}
-            />
-          </TouchableOpacity>
-        )}
-
-        {/* Bottom info overlay with gradient */}
-        {(product.title || product.price != null) && (
-          <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-            {LinearGradient ? (
-              <LinearGradient
-                colors={['transparent', 'rgba(0,0,0,0.6)', 'rgba(0,0,0,0.85)']}
-                style={{ paddingHorizontal: 10, paddingTop: 24, paddingBottom: 10 }}
-              >
-                <ProductCardInfo product={product} displayPrice={displayPrice} hasDiscount={hasDiscount} />
-              </LinearGradient>
-            ) : (
-              <View
-                style={{
-                  paddingHorizontal: 10,
-                  paddingTop: 20,
-                  paddingBottom: 10,
-                  backgroundColor: 'rgba(0,0,0,0.55)',
-                }}
-              >
-                <ProductCardInfo product={product} displayPrice={displayPrice} hasDiscount={hasDiscount} />
-              </View>
-            )}
-          </View>
-        )}
-      </TouchableOpacity>
-    </Animated.View>
-  );
-}
-
-function ProductCardInfo({
-  product,
-  displayPrice,
-  hasDiscount,
-}: {
-  product: Product;
-  displayPrice: number | null | undefined;
-  hasDiscount: boolean | null;
-}) {
-  return (
-    <>
-      {product.source_brand_name && (
-        <Text
-          className="text-white/70 mb-0.5"
-          style={{
-            fontFamily: typography.fontFamily.sans.medium,
-            fontSize: 9,
-            textTransform: 'uppercase',
-            letterSpacing: 0.5,
-          }}
-          numberOfLines={1}
-        >
-          {product.source_brand_name}
-        </Text>
-      )}
-      {product.title && (
-        <Text
-          className="text-white mb-0.5"
-          style={{ fontFamily: typography.fontFamily.sans.medium, fontSize: 12, lineHeight: 16 }}
-          numberOfLines={1}
-        >
-          {product.title}
-        </Text>
-      )}
-      {displayPrice != null && (
-        <View className="flex-row items-center gap-1.5">
-          <Text style={{ color: '#FFF', fontSize: 13, fontFamily: typography.fontFamily.sans.bold }}>
-            ₹{displayPrice.toLocaleString('en-IN')}
-          </Text>
-          {hasDiscount && (
-            <Text
-              style={{
-                color: 'rgba(255,255,255,0.55)',
-                fontSize: 10,
-                fontFamily: typography.fontFamily.sans.regular,
-                textDecorationLine: 'line-through',
-              }}
-            >
-              ₹{product.price.toLocaleString('en-IN')}
-            </Text>
-          )}
-        </View>
-      )}
-    </>
   );
 }
 

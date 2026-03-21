@@ -37,12 +37,13 @@ import { typography } from '../../styles/typography';
 import { Product } from '../../types';
 import { getProducts } from '../../lib/productsApi';
 import { exploreService, feedService } from '../../lib/feedService';
-import { getCollections, Collection } from '../../data/collections';
+import { fetchPublicCollections, CollectionRecord } from '../../lib/collectionsService';
 import { interactionService } from '../../lib/interactionService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWardrobe } from '../../contexts/WardrobeContext';
 import { ProductSheet } from '../../components/ui/ProductSheet';
 import MasonryLayout from '../../components/layouts/MasonryLayout';
+import ProductCard from '../../components/ui/ProductCard';
 
 let LinearGradient: any = null;
 try { LinearGradient = require('expo-linear-gradient').LinearGradient; } catch {}
@@ -93,7 +94,8 @@ export default function DiscoverPage() {
   const [sheetVisible, setSheetVisible] = useState(false);
 
   // Collections strip
-  const [collections, setCollections] = useState<Collection[]>([]);
+  const [collections, setCollections] = useState<CollectionRecord[]>([]);
+  const [collectionCovers, setCollectionCovers] = useState<Record<string, string[]>>({});
 
   // Gender for recommendations
   const [userGender, setUserGender] = useState<string | null>(null);
@@ -101,10 +103,29 @@ export default function DiscoverPage() {
   // Scroll-based header shrink
   const scrollY = useRef(new Animated.Value(0)).current;
 
-  // ── Collections ────────────────────────────────────────────────────────────
+  // ── Collections strip (from Supabase) ──────────────────────────────────────
   useEffect(() => {
-    getProducts({ limit: 300 })
-      .then((products) => setCollections(getCollections(products).slice(0, 6)))
+    fetchPublicCollections()
+      .then(async (cols) => {
+        const top = cols.slice(0, 6);
+        setCollections(top);
+
+        // Preload product images for collections without a cover_image_url
+        const needCovers = top.filter((c) => !c.cover_image_url && c.product_ids.length > 0);
+        if (needCovers.length > 0) {
+          const allIds = Array.from(new Set(needCovers.flatMap((c) => c.product_ids.slice(0, 4))));
+          const prods = await getProducts({ limit: allIds.length + 10 });
+          const byId = new Map(prods.map((p) => [p.id, p]));
+          const covers: Record<string, string[]> = {};
+          needCovers.forEach((col) => {
+            covers[col.id] = col.product_ids
+              .slice(0, 4)
+              .map((id) => byId.get(id)?.image_urls?.[0])
+              .filter(Boolean) as string[];
+          });
+          setCollectionCovers(covers);
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -310,7 +331,7 @@ export default function DiscoverPage() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#f8f8f8' }} edges={['top']}>
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <DiscoverHeader
         isSearchActive={isSearchActive}
@@ -389,7 +410,7 @@ export default function DiscoverPage() {
 
             {/* Collections strip */}
             {collections.length > 0 && (
-              <CollectionsStrip collections={collections} />
+              <CollectionsStrip collections={collections} coverImages={collectionCovers} />
             )}
 
             {/* Section header */}
@@ -516,7 +537,7 @@ function DiscoverHeader({
         paddingHorizontal: theme.spacing.lg,
         paddingTop: 8,
         paddingBottom: 12,
-        backgroundColor: '#fff',
+        backgroundColor: '#f8f8f8',
       }}
     >
       {/* Title row */}
@@ -649,7 +670,7 @@ function VibePills({
 
 // ── Trending Strip ─────────────────────────────────────────────────────────────
 const TRENDING_CARD_WIDTH = SCREEN_WIDTH * 0.52;
-const TRENDING_CARD_HEIGHT = TRENDING_CARD_WIDTH * 1.38;
+const TRENDING_CARD_SKELETON_HEIGHT = TRENDING_CARD_WIDTH * 1.1;
 
 function TrendingStrip({
   products,
@@ -716,154 +737,13 @@ function TrendingCard({
   product: Product;
   onPress: () => void;
 }) {
-  const [imgError, setImgError] = useState(false);
-  const imageUrl = product.image_urls?.[0];
-  const hasDiscount = product.sale_price != null && product.sale_price < product.price;
-  const displayPrice = hasDiscount ? product.sale_price! : product.price;
-  const discountPct = hasDiscount
-    ? Math.round(((product.price - product.sale_price!) / product.price) * 100)
-    : 0;
-
-  // Shadow on outer wrapper (no overflow:hidden) → shadow is not clipped.
-  // overflow:hidden on inner view → image + gradient stay within border radius.
   return (
-    <TouchableOpacity
+    <ProductCard
+      product={product}
+      width={TRENDING_CARD_WIDTH}
+      fixedImageHeight={TRENDING_CARD_SKELETON_HEIGHT}
       onPress={onPress}
-      activeOpacity={0.9}
-      style={{
-        width: TRENDING_CARD_WIDTH,
-        height: TRENDING_CARD_HEIGHT,
-        borderRadius: 18,
-        backgroundColor: theme.colors.neutral[100],
-        ...theme.shadows.md,
-      }}
-    >
-      <View style={{ width: '100%', height: '100%', borderRadius: 18, overflow: 'hidden' }}>
-        {imageUrl && !imgError ? (
-          <Image
-            source={{ uri: imageUrl }}
-            style={{ width: '100%', height: '100%', resizeMode: 'cover' }}
-            onError={() => setImgError(true)}
-          />
-        ) : (
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.neutral[100] }}>
-            <Ionicons name="image-outline" size={32} color={theme.colors.neutral[300]} />
-          </View>
-        )}
-
-        {/* Gradient overlay */}
-        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-          {LinearGradient ? (
-            <LinearGradient
-              colors={['transparent', 'rgba(0,0,0,0.72)', 'rgba(0,0,0,0.92)']}
-              style={{ padding: 12, paddingTop: 32 }}
-            >
-              <TrendingCardContent
-                product={product}
-                displayPrice={displayPrice}
-                hasDiscount={hasDiscount}
-                discountPct={discountPct}
-              />
-            </LinearGradient>
-          ) : (
-            <View style={{ padding: 12, paddingTop: 32, backgroundColor: 'rgba(0,0,0,0.75)' }}>
-              <TrendingCardContent
-                product={product}
-                displayPrice={displayPrice}
-                hasDiscount={hasDiscount}
-                discountPct={discountPct}
-              />
-            </View>
-          )}
-        </View>
-
-        {/* Discount badge */}
-        {hasDiscount && (
-          <View
-            style={{
-              position: 'absolute',
-              top: 10,
-              left: 10,
-              backgroundColor: theme.colors.error,
-              borderRadius: 8,
-              paddingHorizontal: 7,
-              paddingVertical: 3,
-            }}
-          >
-            <Text style={{ fontFamily: typography.fontFamily.sans.bold, fontSize: 10, color: '#fff' }}>
-              -{discountPct}%
-            </Text>
-          </View>
-        )}
-      </View>
-    </TouchableOpacity>
-  );
-}
-
-function TrendingCardContent({
-  product,
-  displayPrice,
-  hasDiscount,
-  discountPct,
-}: {
-  product: Product;
-  displayPrice: number;
-  hasDiscount: boolean;
-  discountPct: number;
-}) {
-  return (
-    <>
-      {product.source_brand_name ? (
-        <Text
-          style={{
-            fontFamily: typography.fontFamily.sans.medium,
-            fontSize: 9,
-            color: 'rgba(255,255,255,0.65)',
-            textTransform: 'uppercase',
-            letterSpacing: 0.8,
-            marginBottom: 2,
-          }}
-          numberOfLines={1}
-        >
-          {product.source_brand_name}
-        </Text>
-      ) : null}
-      <Text
-        style={{
-          fontFamily: typography.fontFamily.sans.semibold,
-          fontSize: 13,
-          color: '#fff',
-          lineHeight: 18,
-          marginBottom: 5,
-        }}
-        numberOfLines={2}
-      >
-        {product.title}
-      </Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-        <Text
-          style={{
-            fontFamily: typography.fontFamily.sans.bold,
-            fontSize: 14,
-            color: '#fff',
-          }}
-        >
-          ₹{displayPrice.toLocaleString('en-IN')}
-        </Text>
-        {hasDiscount && (
-          <Text
-            style={{
-              fontFamily: typography.fontFamily.sans.regular,
-              fontSize: 10,
-              color: 'rgba(255,255,255,0.5)',
-              textDecorationLine: 'line-through',
-            }}
-          >
-            ₹{product.price.toLocaleString('en-IN')}
-          </Text>
-        )}
-      </View>
-    </>
+    />
   );
 }
 
@@ -883,7 +763,7 @@ function TrendingSkeletonCard() {
     <Animated.View
       style={{
         width: TRENDING_CARD_WIDTH,
-        height: TRENDING_CARD_HEIGHT,
+        height: TRENDING_CARD_SKELETON_HEIGHT,
         borderRadius: 18,
         backgroundColor: theme.colors.neutral[200],
         opacity,
@@ -895,36 +775,46 @@ function TrendingSkeletonCard() {
 // ── Collections Strip ──────────────────────────────────────────────────────────
 import { router as expoRouter } from 'expo-router';
 
-const COLL_CARD_W = SCREEN_WIDTH * 0.42;
-const COLL_IMG_SIZE = (COLL_CARD_W - 2) / 2; // 2x2 mosaic cell
+// Portrait magazine card: wider, taller, text overlaid on gradient
+const COLL_CARD_W = SCREEN_WIDTH * 0.56;
+const COLL_CARD_H = COLL_CARD_W * 1.46;
+const COLL_MINI = (COLL_CARD_W - 2) / 2;
 
-function CollectionsStrip({ collections }: { collections: Collection[] }) {
+function CollectionsStrip({
+  collections,
+  coverImages,
+}: {
+  collections: CollectionRecord[];
+  coverImages: Record<string, string[]>;
+}) {
   return (
-    <View style={{ marginTop: 20 }}>
+    <View style={{ marginTop: 24 }}>
       {/* Header */}
       <View
         style={{
           flexDirection: 'row',
-          alignItems: 'center',
+          alignItems: 'baseline',
           justifyContent: 'space-between',
           paddingHorizontal: theme.spacing.lg,
-          marginBottom: 12,
+          marginBottom: 14,
         }}
       >
-        <Text
-          style={{
-            fontFamily: typography.fontFamily.sans.semibold,
-            fontSize: 13,
-            color: theme.colors.neutral[700],
-            letterSpacing: 0.8,
-            textTransform: 'uppercase',
-          }}
-        >
-          Collections
-        </Text>
+        <View>
+          <Text
+            style={{
+              fontFamily: typography.fontFamily.serif.regular,
+              fontSize: 20,
+              color: theme.colors.neutral[900],
+              letterSpacing: -0.3,
+            }}
+          >
+            Collections
+          </Text>
+        </View>
         <TouchableOpacity
           onPress={() => expoRouter.push('/collection')}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}
         >
           <Text
             style={{
@@ -935,6 +825,7 @@ function CollectionsStrip({ collections }: { collections: Collection[] }) {
           >
             See all
           </Text>
+          <Ionicons name="chevron-forward" size={13} color={theme.colors.primary[600]} />
         </TouchableOpacity>
       </View>
 
@@ -942,14 +833,19 @@ function CollectionsStrip({ collections }: { collections: Collection[] }) {
         horizontal
         showsHorizontalScrollIndicator={false}
         decelerationRate="fast"
-        snapToInterval={COLL_CARD_W + 12}
+        snapToInterval={COLL_CARD_W + 14}
         snapToAlignment="start"
-        contentContainerStyle={{ paddingHorizontal: theme.spacing.lg, paddingTop: 4, paddingBottom: 10, gap: 12 }}
+        contentContainerStyle={{
+          paddingHorizontal: theme.spacing.lg,
+          paddingBottom: 12,
+          gap: 14,
+        }}
       >
         {collections.map((col) => (
           <CollectionCard
             key={col.id}
             collection={col}
+            previewImages={col.cover_image_url ? [col.cover_image_url] : (coverImages[col.id] ?? [])}
             onPress={() => expoRouter.push(`/collection/${col.id}`)}
           />
         ))}
@@ -960,87 +856,101 @@ function CollectionsStrip({ collections }: { collections: Collection[] }) {
 
 function CollectionCard({
   collection,
+  previewImages,
   onPress,
 }: {
-  collection: Collection;
+  collection: CollectionRecord;
+  previewImages: string[];
   onPress: () => void;
 }) {
   const [imgErrors, setImgErrors] = useState<Set<number>>(new Set());
-  const images = collection.coverImages.slice(0, 4);
+  const hasCover = !!collection.cover_image_url && previewImages.length > 0;
+  const mosaicImages = previewImages.slice(0, 4);
 
-  // Shadow lives on outer wrapper (no overflow:hidden so shadow isn't clipped).
-  // Border radius + overflow:hidden are on the inner content view.
+  // Outer has shadow (no overflow:hidden). Inner clips image + gradient.
   return (
     <TouchableOpacity
       onPress={onPress}
-      activeOpacity={0.88}
+      activeOpacity={0.9}
       style={{
         width: COLL_CARD_W,
-        borderRadius: 14,
-        backgroundColor: theme.colors.neutral[50],
-        ...theme.shadows.sm,
+        height: COLL_CARD_H,
+        borderRadius: 22,
+        ...theme.shadows.md,
       }}
     >
-      <View style={{ borderRadius: 14, overflow: 'hidden' }}>
-        {/* 2×2 mosaic */}
-        <View
-          style={{
-            width: COLL_CARD_W,
-            height: COLL_CARD_W,
-            flexDirection: 'row',
-            flexWrap: 'wrap',
-            gap: 1.5,
-          }}
-        >
-          {Array.from({ length: 4 }).map((_, idx) => {
-            const url = images[idx];
-            if (!url || imgErrors.has(idx)) {
+      <View style={{ width: COLL_CARD_W, height: COLL_CARD_H, borderRadius: 22, overflow: 'hidden', backgroundColor: theme.colors.neutral[200] }}>
+        {/* Image */}
+        {hasCover ? (
+          <Image source={{ uri: previewImages[0] }} style={{ width: '100%', height: '100%', resizeMode: 'cover' }} />
+        ) : mosaicImages.length > 0 ? (
+          <View style={{ width: COLL_CARD_W, height: COLL_CARD_H, flexDirection: 'row', flexWrap: 'wrap', gap: 1.5 }}>
+            {Array.from({ length: 4 }).map((_, idx) => {
+              const url = mosaicImages[idx];
+              if (!url || imgErrors.has(idx)) {
+                return <View key={idx} style={{ width: COLL_MINI, height: COLL_CARD_H / 2 - 0.75, backgroundColor: theme.colors.neutral[200] }} />;
+              }
               return (
-                <View
+                <Image
                   key={idx}
-                  style={{
-                    width: COLL_IMG_SIZE,
-                    height: COLL_IMG_SIZE,
-                    backgroundColor: theme.colors.neutral[200],
-                  }}
+                  source={{ uri: url }}
+                  style={{ width: COLL_MINI, height: COLL_CARD_H / 2 - 0.75, resizeMode: 'cover' }}
+                  onError={() => setImgErrors((prev) => new Set(prev).add(idx))}
                 />
               );
-            }
-            return (
-              <Image
-                key={idx}
-                source={{ uri: url }}
-                style={{ width: COLL_IMG_SIZE, height: COLL_IMG_SIZE, resizeMode: 'cover' }}
-                onError={() => setImgErrors((prev) => new Set(prev).add(idx))}
-              />
-            );
-          })}
-        </View>
+            })}
+          </View>
+        ) : (
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons name="images-outline" size={36} color={theme.colors.neutral[400]} />
+          </View>
+        )}
 
-        {/* Info */}
-        <View style={{ padding: 10 }}>
-          <Text
-            numberOfLines={1}
-            style={{
-              fontFamily: typography.fontFamily.serif.medium,
-              fontSize: 13,
-              color: theme.colors.neutral[900],
-            }}
-          >
-            {collection.name}
-          </Text>
-          <Text
-            style={{
-              fontFamily: typography.fontFamily.sans.regular,
-              fontSize: 10,
-              color: theme.colors.neutral[400],
-              marginTop: 2,
-            }}
-          >
-            {collection.saves} saves
-          </Text>
+        {/* Gradient text overlay — full bottom third */}
+        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+          {LinearGradient ? (
+            <LinearGradient
+              colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.88)']}
+              style={{ paddingHorizontal: 14, paddingTop: 40, paddingBottom: 14 }}
+            >
+              <CollCardText collection={collection} />
+            </LinearGradient>
+          ) : (
+            <View style={{ backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 14, paddingTop: 20, paddingBottom: 14 }}>
+              <CollCardText collection={collection} />
+            </View>
+          )}
         </View>
       </View>
     </TouchableOpacity>
+  );
+}
+
+function CollCardText({ collection }: { collection: CollectionRecord }) {
+  return (
+    <>
+      <Text
+        numberOfLines={2}
+        style={{
+          fontFamily: typography.fontFamily.serif.medium,
+          fontSize: 16,
+          color: '#fff',
+          lineHeight: 21,
+          letterSpacing: 0.1,
+        }}
+      >
+        {collection.name}
+      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 5 }}>
+        <Ionicons name="bookmark-outline" size={10} color="rgba(255,255,255,0.6)" />
+        <Text style={{ fontFamily: typography.fontFamily.sans.regular, fontSize: 11, color: 'rgba(255,255,255,0.65)' }}>
+          {collection.saves_count} saves
+        </Text>
+        <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 10 }}>·</Text>
+        <Text style={{ fontFamily: typography.fontFamily.sans.regular, fontSize: 11, color: 'rgba(255,255,255,0.65)' }}>
+          {collection.product_ids.length} items
+        </Text>
+      </View>
+    </>
   );
 }

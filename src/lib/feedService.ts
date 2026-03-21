@@ -74,6 +74,22 @@ function scoreByPreferences(product: Product, prefs: UserPreferences): number {
   return score;
 }
 
+/**
+ * Shuffle the top `topFraction` of a scored+sorted array, keep the rest in order.
+ * Ensures relevant products still surface, but in a different order each session.
+ */
+function shuffleTopTier<T>(items: T[], topFraction = 0.6): T[] {
+  if (items.length <= 2) return items;
+  const cutoff = Math.max(2, Math.floor(items.length * topFraction));
+  const top = items.slice(0, cutoff);
+  const rest = items.slice(cutoff);
+  for (let i = top.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [top[i], top[j]] = [top[j], top[i]];
+  }
+  return [...top, ...rest];
+}
+
 function applyBrandDiversityCap(products: Product[], maxPerBrand: number = 5): Product[] {
   const brandCount: Record<string, number> = {};
   return products.filter((p) => {
@@ -462,13 +478,14 @@ export const feedService = {
 
     const scored = fetched.map((p) => ({
       product: p,
-      // Stronger noise (1.0) so preferences guide but don't lock in the same order
-      score: scoreByPreferences(p, prefs) + Math.random() * 1.0,
+      // Noise up to 4.0 — wide enough to reorder within the relevant tier each session
+      score: scoreByPreferences(p, prefs) + Math.random() * 4.0,
     }));
 
     scored.sort((a, b) => b.score - a.score);
 
-    let result = scored.map((s) => s.product);
+    // Shuffle top 60% so relevant products surface in a different order each session
+    let result = shuffleTopTier(scored.map((s) => s.product), 0.6);
     result = applyBrandDiversityCap(result);
     return paginate(result, limit, offset);
   },
@@ -541,14 +558,15 @@ export const feedService = {
         prefScore = scoreByPreferences(candidate, prefs);
       }
 
-      // Noise at 1.0: relevant products stay near top but order varies per session
-      const totalScore = 0.7 * behavioralScore + 0.3 * prefScore + Math.random() * 1.0;
+      // Noise at 3.0: meaningful randomness relative to behavioral score range
+      const totalScore = 0.7 * behavioralScore + 0.3 * prefScore + Math.random() * 3.0;
       return { product: candidate, score: totalScore };
     });
 
     scored.sort((a, b) => b.score - a.score);
 
-    let result = scored.map((s) => s.product);
+    // Shuffle top 60% for session variety
+    let result = shuffleTopTier(scored.map((s) => s.product), 0.6);
     result = applyBrandDiversityCap(result);
     return paginate(result, limit, offset);
   },

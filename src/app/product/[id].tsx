@@ -11,11 +11,13 @@ import {
   Animated,
   Modal,
   TextInput,
+  Switch,
+  KeyboardAvoidingView,
   Platform,
-  PanResponder,
-  ActionSheetIOS,
-  Alert,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, router } from "expo-router";
@@ -31,6 +33,13 @@ import { preferenceService } from "../../lib/preferenceService";
 import { recommendationService } from "../../lib/recommendationService";
 import { feedService } from "../../lib/feedService";
 import { clientStorage } from "../../lib/clientStorage";
+import {
+  CollectionRecord,
+  fetchUserCollections,
+  createCollection as createCollectionService,
+  addProductToCollection,
+  removeProductFromCollection,
+} from "../../lib/collectionsService";
 
 let Haptics: typeof import("expo-haptics") | null = null;
 try { Haptics = require("expo-haptics"); } catch {}
@@ -44,10 +53,11 @@ export default function ProductDetailPage() {
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [imageError, setImageError] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
-  const [newCollectionName, setNewCollectionName] = useState("");
+  const [userCollections, setUserCollections] = useState<CollectionRecord[]>([]);
+  const [loadingCollections, setLoadingCollections] = useState(false);
+  const [showCreateSubSheet, setShowCreateSubSheet] = useState(false);
   const [similarProducts, setSimilarProducts] = useState<Product[]>([]);
   const [loadingSimilar, setLoadingSimilar] = useState(true);
 
@@ -63,32 +73,7 @@ export default function ProductDetailPage() {
   const detailsHeight = useRef(new Animated.Value(0)).current;
   const detailsOpacity = useRef(new Animated.Value(0)).current;
 
-  // Image swipe pan responder
-  const imageSwipeDx = useRef(0);
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        return Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dy) < 30;
-      },
-      onPanResponderGrant: () => { imageSwipeDx.current = 0; },
-      onPanResponderMove: (_, gestureState) => {
-        imageSwipeDx.current = gestureState.dx;
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dx < -50) {
-          setCurrentImageIndex((prev) => {
-            const product = productRef.current;
-            if (!product) return prev;
-            return Math.min(prev + 1, product.image_urls.length - 1);
-          });
-        } else if (gestureState.dx > 50) {
-          setCurrentImageIndex((prev) => Math.max(prev - 1, 0));
-        }
-      },
-    })
-  ).current;
-
+  const imageScrollRef = useRef<ScrollView>(null);
   const productRef = useRef<Product | null>(null);
 
   useEffect(() => {
@@ -106,10 +91,6 @@ export default function ProductDetailPage() {
       loadProductAndSimilar(id);
     }
   }, [id]);
-
-  useEffect(() => {
-    setImageError(false);
-  }, [currentImageIndex]);
 
   useEffect(() => {
     if (product) {
@@ -207,19 +188,48 @@ export default function ProductDetailPage() {
     }
   }, [id, userId, isLiked, wardrobe]);
 
-  const handleSave = useCallback((collectionId: string) => {
+  // Load user's DB collections when the save sheet opens
+  useEffect(() => {
+    if (!showSaveModal || !userId) return;
+    setLoadingCollections(true);
+    fetchUserCollections(userId)
+      .then(setUserCollections)
+      .catch(() => {})
+      .finally(() => setLoadingCollections(false));
+  }, [showSaveModal, userId]);
+
+  const handleToggleInCollection = useCallback(async (col: CollectionRecord) => {
     if (!id) return;
-    const isIn = wardrobe.isInCollection(collectionId, id);
-    if (isIn) {
-      wardrobe.removeFromCollection(collectionId, id);
-    } else {
-      wardrobe.addToCollection(collectionId, id);
-      if (userId && productRef.current) {
-        interactionService.logInteraction(userId, id, 'save').catch(() => {});
-        preferenceService.handleInteraction(userId, productRef.current, 'save').catch(() => {});
+    const isIn = col.product_ids.includes(id);
+    // Optimistic UI update
+    setUserCollections((prev) =>
+      prev.map((c) =>
+        c.id === col.id
+          ? { ...c, product_ids: isIn ? c.product_ids.filter((p) => p !== id) : [...c.product_ids, id] }
+          : c
+      )
+    );
+    try {
+      if (isIn) {
+        await removeProductFromCollection(col.id, id);
+      } else {
+        await addProductToCollection(col.id, id);
+        if (userId && productRef.current) {
+          interactionService.logInteraction(userId, id, 'save').catch(() => {});
+          preferenceService.handleInteraction(userId, productRef.current, 'save').catch(() => {});
+        }
       }
+    } catch {
+      // Revert on failure
+      setUserCollections((prev) =>
+        prev.map((c) =>
+          c.id === col.id
+            ? { ...c, product_ids: isIn ? [...c.product_ids, id] : c.product_ids.filter((p) => p !== id) }
+            : c
+        )
+      );
     }
-  }, [id, userId, wardrobe]);
+  }, [id, userId]);
 
   const handleBuyNow = async () => {
     if (!product?.affiliate_url) return;
@@ -228,10 +238,7 @@ export default function ProductDetailPage() {
         interactionService.logInteraction(userId, id, 'purchase').catch(() => {});
         preferenceService.handleInteraction(userId, product, 'purchase').catch(() => {});
       }
-      const supported = await Linking.canOpenURL(product.affiliate_url);
-      if (supported) {
-        await Linking.openURL(product.affiliate_url);
-      }
+      await Linking.openURL(product.affiliate_url);
     } catch (error) {
       console.error("Error opening URL:", error);
     }
@@ -267,7 +274,6 @@ export default function ProductDetailPage() {
   }
 
   const images = product.image_urls || [];
-  const currentImage = images[currentImageIndex] || images[0];
   const colors = product.colors || [];
   const sizeRange = product.size_range || [];
   const displayPrice = product.sale_price && product.sale_price < product.price
@@ -329,80 +335,92 @@ export default function ProductDetailPage() {
         onScroll={handleScrollDepth}
         scrollEventThrottle={500}
       >
-        {/* Product Image with swipe */}
-        {currentImage && !imageError ? (
-          <View
-            className="relative bg-neutral-100"
+        {/* Product Image carousel */}
+        <View style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH * 1.2 }}>
+          <ScrollView
+            ref={imageScrollRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            scrollEventThrottle={16}
+            onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
+              const idx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+              if (idx !== currentImageIndex) setCurrentImageIndex(idx);
+            }}
             style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH * 1.2 }}
-            {...panResponder.panHandlers}
           >
-            <Image
-              source={{ uri: currentImage }}
-              style={{ width: "100%", height: "100%", resizeMode: "cover" }}
-              onError={() => setImageError(true)}
-            />
-
-            {/* Action buttons */}
-            <View className="absolute top-4 right-4 gap-3">
-              <TouchableOpacity
-                onPress={handleLike}
-                className="w-10 h-10 rounded-full items-center justify-center"
-                style={{ backgroundColor: "rgba(255, 255, 255, 0.92)", ...theme.shadows.sm }}
-                activeOpacity={0.8}
-              >
-                <Ionicons
-                  name={isLiked ? "heart" : "heart-outline"}
-                  size={20}
-                  color={isLiked ? theme.colors.error : theme.colors.neutral[600]}
-                />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setShowSaveModal(true)}
-                className="w-10 h-10 rounded-full items-center justify-center"
-                style={{ backgroundColor: "rgba(255, 255, 255, 0.92)", ...theme.shadows.sm }}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="bookmark-outline" size={18} color={theme.colors.neutral[600]} />
-              </TouchableOpacity>
-            </View>
-
-            {/* Discount badge */}
-            {hasDiscount && (
+            {images.length > 0 ? images.map((uri, index) => (
+              <Image
+                key={index}
+                source={{ uri }}
+                style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH * 1.2, resizeMode: "cover" }}
+              />
+            )) : (
               <View
-                className="absolute top-4 left-4 px-3 py-1.5 rounded-full"
-                style={{ backgroundColor: theme.colors.error }}
+                className="items-center justify-center bg-neutral-100"
+                style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH * 1.2 }}
               >
-                <Text className="text-white" style={{ fontFamily: typography.fontFamily.sans.bold, fontSize: 11 }}>
-                  {discountPercent}% OFF
-                </Text>
+                <Ionicons name="image-outline" size={48} color={theme.colors.neutral[300]} />
               </View>
             )}
+          </ScrollView>
 
-            {/* Image dots */}
-            {images.length > 1 && (
-              <View className="absolute bottom-4 left-0 right-0 flex-row justify-center gap-1.5">
-                {images.map((_, index) => (
-                  <TouchableOpacity
-                    key={index}
-                    onPress={() => setCurrentImageIndex(index)}
-                    className="h-2 rounded-full"
-                    style={{
-                      width: index === currentImageIndex ? 16 : 8,
-                      backgroundColor: index === currentImageIndex ? "#FFFFFF" : "rgba(255,255,255,0.5)",
-                    }}
-                  />
-                ))}
-              </View>
-            )}
+          {/* Action buttons */}
+          <View className="absolute top-4 right-4 gap-3">
+            <TouchableOpacity
+              onPress={handleLike}
+              className="w-10 h-10 rounded-full items-center justify-center"
+              style={{ backgroundColor: "rgba(255, 255, 255, 0.92)", ...theme.shadows.sm }}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={isLiked ? "heart" : "heart-outline"}
+                size={20}
+                color={isLiked ? theme.colors.error : theme.colors.neutral[600]}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setShowSaveModal(true)}
+              className="w-10 h-10 rounded-full items-center justify-center"
+              style={{ backgroundColor: "rgba(255, 255, 255, 0.92)", ...theme.shadows.sm }}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="bookmark-outline" size={18} color={theme.colors.neutral[600]} />
+            </TouchableOpacity>
           </View>
-        ) : (
-          <View
-            className="items-center justify-center bg-neutral-100"
-            style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH * 1.2 }}
-          >
-            <Ionicons name="image-outline" size={48} color={theme.colors.neutral[300]} />
-          </View>
-        )}
+
+          {/* Discount badge */}
+          {hasDiscount && (
+            <View
+              className="absolute top-4 left-4 px-3 py-1.5 rounded-full"
+              style={{ backgroundColor: theme.colors.error }}
+            >
+              <Text className="text-white" style={{ fontFamily: typography.fontFamily.sans.bold, fontSize: 11 }}>
+                {discountPercent}% OFF
+              </Text>
+            </View>
+          )}
+
+          {/* Image dots */}
+          {images.length > 1 && (
+            <View className="absolute bottom-4 left-0 right-0 flex-row justify-center gap-1.5">
+              {images.map((_, index) => (
+                <TouchableOpacity
+                  key={index}
+                  onPress={() => {
+                    imageScrollRef.current?.scrollTo({ x: index * SCREEN_WIDTH, animated: true });
+                    setCurrentImageIndex(index);
+                  }}
+                  className="h-2 rounded-full"
+                  style={{
+                    width: index === currentImageIndex ? 16 : 8,
+                    backgroundColor: index === currentImageIndex ? "#FFFFFF" : "rgba(255,255,255,0.5)",
+                  }}
+                />
+              ))}
+            </View>
+          )}
+        </View>
 
         {/* Product Info */}
         <Animated.View
@@ -610,123 +628,136 @@ export default function ProductDetailPage() {
         </View>
       )}
 
-      {/* Save to Collection Modal */}
+      {/* Save to Collection Sheet */}
       <Modal
         visible={showSaveModal}
         transparent
         animationType="slide"
         onRequestClose={() => setShowSaveModal(false)}
       >
-        <KeyboardAvoidingViewWrapper>
-          <View className="flex-1" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
-            <TouchableOpacity className="flex-1" onPress={() => setShowSaveModal(false)} activeOpacity={1} />
-            <View className="bg-white rounded-t-3xl" style={{ maxHeight: "65%" }}>
-              <View
-                className="flex-row items-center justify-between px-5 py-4 border-b"
-                style={{ borderBottomColor: theme.colors.neutral[200] }}
-              >
-                <Text style={{ fontFamily: typography.fontFamily.serif.medium, fontSize: 18, color: theme.colors.neutral[900] }}>
-                  Save to Collection
-                </Text>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)" }}>
+          <TouchableOpacity style={{ flex: 1 }} onPress={() => setShowSaveModal(false)} activeOpacity={1} />
+          <View style={{ backgroundColor: "#fff", borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: Platform.OS === "ios" ? 40 : 24 }}>
+            {/* Handle */}
+            <View style={{ alignItems: "center", paddingTop: 12, paddingBottom: 4 }}>
+              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: theme.colors.neutral[200] }} />
+            </View>
+
+            {/* Header */}
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.colors.neutral[100] }}>
+              <Text style={{ fontFamily: typography.fontFamily.serif.medium, fontSize: 20, color: theme.colors.neutral[900] }}>
+                Save to Wardrobe
+              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <TouchableOpacity
+                  onPress={() => setShowCreateSubSheet(true)}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: theme.colors.primary[500], paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20 }}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="add" size={16} color="#fff" />
+                  <Text style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 12, color: "#fff" }}>New</Text>
+                </TouchableOpacity>
                 <TouchableOpacity onPress={() => setShowSaveModal(false)}>
-                  <Ionicons name="close" size={24} color={theme.colors.neutral[600]} />
+                  <Ionicons name="close" size={24} color={theme.colors.neutral[500]} />
                 </TouchableOpacity>
               </View>
-
-              <ScrollView
-                keyboardShouldPersistTaps="handled"
-                contentContainerStyle={{ padding: 20, paddingBottom: Platform.OS === "ios" ? 40 : 20 }}
-              >
-                <View className="mb-5">
-                  <Text className="mb-2" style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 13, color: theme.colors.neutral[700] }}>
-                    New collection
-                  </Text>
-                  <View className="flex-row items-center gap-3">
-                    <TextInput
-                      value={newCollectionName}
-                      onChangeText={setNewCollectionName}
-                      placeholder="Collection name"
-                      placeholderTextColor={theme.colors.neutral[400]}
-                      className="flex-1 rounded-xl px-4"
-                      style={{
-                        height: 44,
-                        backgroundColor: theme.colors.neutral[100],
-                        fontFamily: typography.fontFamily.sans.regular,
-                        fontSize: 14,
-                        color: theme.colors.neutral[900],
-                      }}
-                    />
-                    <TouchableOpacity
-                      onPress={() => {
-                        if (newCollectionName.trim() && id) {
-                          const col = wardrobe.createCollection(newCollectionName.trim());
-                          wardrobe.addToCollection(col.id, id);
-                          if (userId && productRef.current) {
-                            interactionService.logInteraction(userId, id, 'save').catch(() => {});
-                            preferenceService.handleInteraction(userId, productRef.current, 'save').catch(() => {});
-                          }
-                          setNewCollectionName("");
-                          setShowSaveModal(false);
-                        }
-                      }}
-                      className="rounded-xl items-center justify-center"
-                      style={{
-                        height: 44,
-                        paddingHorizontal: 16,
-                        backgroundColor: newCollectionName.trim() ? theme.colors.primary[500] : theme.colors.neutral[200],
-                      }}
-                      disabled={!newCollectionName.trim()}
-                    >
-                      <Text style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 13, color: newCollectionName.trim() ? "#FFF" : theme.colors.neutral[400] }}>
-                        Create
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {wardrobe.userCollections.length > 0 && (
-                  <View>
-                    <Text className="mb-3" style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 13, color: theme.colors.neutral[700] }}>
-                      Your collections
-                    </Text>
-                    {wardrobe.userCollections.map((col) => {
-                      const isIn = id ? wardrobe.isInCollection(col.id, id) : false;
-                      return (
-                        <TouchableOpacity
-                          key={col.id}
-                          onPress={() => handleSave(col.id)}
-                          className="flex-row items-center justify-between py-3.5 border-b"
-                          style={{ borderBottomColor: theme.colors.neutral[100] }}
-                          activeOpacity={0.7}
-                        >
-                          <View className="flex-1 mr-3">
-                            <Text numberOfLines={1} style={{ fontFamily: typography.fontFamily.sans.medium, fontSize: 15, color: theme.colors.neutral[900] }}>
-                              {col.name}
-                            </Text>
-                            <Text style={{ fontFamily: typography.fontFamily.sans.regular, fontSize: 12, color: theme.colors.neutral[500] }}>
-                              {col.productIds.length} item{col.productIds.length !== 1 ? "s" : ""}
-                            </Text>
-                          </View>
-                          <View
-                            className="w-6 h-6 rounded-md items-center justify-center"
-                            style={{
-                              backgroundColor: isIn ? theme.colors.primary[500] : "transparent",
-                              borderWidth: isIn ? 0 : 1.5,
-                              borderColor: theme.colors.neutral[300],
-                            }}
-                          >
-                            {isIn && <Ionicons name="checkmark" size={16} color="#FFF" />}
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                )}
-              </ScrollView>
             </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={{ maxHeight: 360 }}
+              contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 16, paddingBottom: 8 }}
+            >
+              {loadingCollections ? (
+                <ActivityIndicator size="small" color={theme.colors.primary[500]} style={{ marginVertical: 24 }} />
+              ) : userCollections.length === 0 ? (
+                <View style={{ alignItems: "center", paddingVertical: 32 }}>
+                  <Ionicons name="albums-outline" size={40} color={theme.colors.neutral[300]} />
+                  <Text style={{ fontFamily: typography.fontFamily.sans.medium, fontSize: 14, color: theme.colors.neutral[500], marginTop: 10, textAlign: "center" }}>
+                    No collections yet
+                  </Text>
+                  <Text style={{ fontFamily: typography.fontFamily.sans.regular, fontSize: 12, color: theme.colors.neutral[400], marginTop: 4, textAlign: "center" }}>
+                    Tap <Text style={{ fontFamily: typography.fontFamily.sans.semibold, color: theme.colors.primary[500] }}>+ New</Text> to create one
+                  </Text>
+                </View>
+              ) : (
+                userCollections.map((col) => {
+                  const isIn = id ? col.product_ids.includes(id) : false;
+                  return (
+                    <TouchableOpacity
+                      key={col.id}
+                      onPress={() => handleToggleInCollection(col)}
+                      style={{ flexDirection: "row", alignItems: "center", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.neutral[100] }}
+                      activeOpacity={0.7}
+                    >
+                      {/* Cover thumbnail */}
+                      <View style={{ width: 48, height: 48, borderRadius: 10, overflow: "hidden", backgroundColor: theme.colors.neutral[100], marginRight: 12 }}>
+                        {col.cover_image_url ? (
+                          <Image source={{ uri: col.cover_image_url }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
+                        ) : (
+                          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                            <Ionicons name="images-outline" size={20} color={theme.colors.neutral[300]} />
+                          </View>
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text numberOfLines={1} style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 14, color: theme.colors.neutral[900] }}>
+                          {col.name}
+                        </Text>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
+                          <Text style={{ fontFamily: typography.fontFamily.sans.regular, fontSize: 12, color: theme.colors.neutral[400] }}>
+                            {col.product_ids.length} item{col.product_ids.length !== 1 ? "s" : ""}
+                          </Text>
+                          <Text style={{ fontSize: 10, color: theme.colors.neutral[300] }}>·</Text>
+                          <Ionicons
+                            name={col.is_public ? "globe-outline" : "lock-closed-outline"}
+                            size={11}
+                            color={theme.colors.neutral[400]}
+                          />
+                          <Text style={{ fontFamily: typography.fontFamily.sans.regular, fontSize: 12, color: theme.colors.neutral[400] }}>
+                            {col.is_public ? "Public" : "Private"}
+                          </Text>
+                        </View>
+                      </View>
+                      <View
+                        style={{
+                          width: 26,
+                          height: 26,
+                          borderRadius: 8,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          backgroundColor: isIn ? theme.colors.primary[500] : "transparent",
+                          borderWidth: isIn ? 0 : 1.5,
+                          borderColor: theme.colors.neutral[300],
+                        }}
+                      >
+                        {isIn && <Ionicons name="checkmark" size={15} color="#fff" />}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
           </View>
-        </KeyboardAvoidingViewWrapper>
+        </View>
       </Modal>
+
+      {/* Create Collection Sub-Sheet */}
+      {userId && (
+        <CreateCollectionSubSheet
+          visible={showCreateSubSheet}
+          userId={userId}
+          onClose={() => setShowCreateSubSheet(false)}
+          onCreated={(col) => {
+            setUserCollections((prev) => [col, ...prev]);
+            setShowCreateSubSheet(false);
+            // Auto-add current product to the new collection
+            if (id) {
+              handleToggleInCollection(col);
+            }
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -746,15 +777,132 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function KeyboardAvoidingViewWrapper({ children }: { children: React.ReactNode }) {
-  const { KeyboardAvoidingView } = require('react-native');
+// ── Create Collection Sub-Sheet ───────────────────────────────────────────────
+
+function CreateCollectionSubSheet({
+  visible,
+  userId,
+  onClose,
+  onCreated,
+}: {
+  visible: boolean;
+  userId: string;
+  onClose: () => void;
+  onCreated: (col: CollectionRecord) => void;
+}) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [isPublic, setIsPublic] = useState(true);
+  const [coverUri, setCoverUri] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const reset = () => { setName(''); setDescription(''); setIsPublic(true); setCoverUri(null); setCreating(false); };
+  const handleClose = () => { reset(); onClose(); };
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 5],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) setCoverUri(result.assets[0].uri);
+  };
+
+  const handleCreate = async () => {
+    if (!name.trim()) return;
+    setCreating(true);
+    try {
+      const col = await createCollectionService({ userId, name: name.trim(), description: description.trim() || undefined, coverImageUri: coverUri, isPublic });
+      reset();
+      onCreated(col);
+    } catch {
+      setCreating(false);
+    }
+  };
+
+  const canCreate = name.trim().length > 0 && !creating;
+
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      style={{ flex: 1 }}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
-    >
-      {children}
-    </KeyboardAvoidingView>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }} keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' }}>
+          <TouchableOpacity style={{ flex: 1 }} onPress={handleClose} activeOpacity={1} />
+          <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: Platform.OS === 'ios' ? 40 : 24 }}>
+            {/* Handle */}
+            <View style={{ alignItems: 'center', paddingTop: 12, paddingBottom: 4 }}>
+              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: theme.colors.neutral[200] }} />
+            </View>
+            {/* Header */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.colors.neutral[100] }}>
+              <Text style={{ fontFamily: typography.fontFamily.serif.medium, fontSize: 20, color: theme.colors.neutral[900] }}>New Collection</Text>
+              <TouchableOpacity onPress={handleClose}>
+                <Ionicons name="close" size={24} color={theme.colors.neutral[500]} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 }}>
+              {/* Cover Image */}
+              <TouchableOpacity onPress={pickImage} activeOpacity={0.85}>
+                <View style={{ width: '100%', height: 160, borderRadius: 18, backgroundColor: theme.colors.neutral[100], alignItems: 'center', justifyContent: 'center', overflow: 'hidden', marginBottom: 20, borderWidth: coverUri ? 0 : 1.5, borderColor: theme.colors.neutral[200], borderStyle: 'dashed' }}>
+                  {coverUri ? (
+                    <>
+                      <Image source={{ uri: coverUri }} style={{ width: '100%', height: '100%', resizeMode: 'cover' }} />
+                      <View style={{ position: 'absolute', bottom: 10, right: 10, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                        <Ionicons name="camera-outline" size={14} color="#fff" />
+                        <Text style={{ fontFamily: typography.fontFamily.sans.medium, fontSize: 11, color: '#fff' }}>Change</Text>
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <Ionicons name="image-outline" size={32} color={theme.colors.neutral[300]} />
+                      <Text style={{ fontFamily: typography.fontFamily.sans.medium, fontSize: 13, color: theme.colors.neutral[400], marginTop: 7 }}>Add Cover Photo</Text>
+                    </>
+                  )}
+                </View>
+              </TouchableOpacity>
+
+              {/* Name */}
+              <Text style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 13, color: theme.colors.neutral[700], marginBottom: 8 }}>Name</Text>
+              <TextInput value={name} onChangeText={setName} placeholder="e.g. Summer Essentials" placeholderTextColor={theme.colors.neutral[400]} maxLength={60}
+                style={{ backgroundColor: theme.colors.neutral[100], borderRadius: 12, paddingHorizontal: 14, height: 48, fontFamily: typography.fontFamily.sans.regular, fontSize: 15, color: theme.colors.neutral[900], borderWidth: 1, borderColor: theme.colors.neutral[200], marginBottom: 16 }} />
+
+              {/* Description */}
+              <Text style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 13, color: theme.colors.neutral[700], marginBottom: 8 }}>
+                Description <Text style={{ fontFamily: typography.fontFamily.sans.regular, color: theme.colors.neutral[400] }}>(optional)</Text>
+              </Text>
+              <TextInput value={description} onChangeText={setDescription} placeholder="What's this collection about?" placeholderTextColor={theme.colors.neutral[400]} multiline maxLength={200}
+                style={{ backgroundColor: theme.colors.neutral[100], borderRadius: 12, paddingHorizontal: 14, height: 80, fontFamily: typography.fontFamily.sans.regular, fontSize: 15, color: theme.colors.neutral[900], borderWidth: 1, borderColor: theme.colors.neutral[200], textAlignVertical: 'top', paddingTop: 12, marginBottom: 20 }} />
+
+              {/* Public / Private */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: theme.colors.neutral[50], padding: 16, borderRadius: 14, marginBottom: 24, borderWidth: 1, borderColor: theme.colors.neutral[100] }}>
+                <Ionicons name={isPublic ? 'globe-outline' : 'lock-closed-outline'} size={20} color={isPublic ? theme.colors.primary[500] : theme.colors.neutral[500]} />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 14, color: theme.colors.neutral[900] }}>{isPublic ? 'Public' : 'Private'}</Text>
+                  <Text style={{ fontFamily: typography.fontFamily.sans.regular, fontSize: 12, color: theme.colors.neutral[400], marginTop: 1 }}>
+                    {isPublic ? 'Anyone can discover this collection' : 'Only you can see this collection'}
+                  </Text>
+                </View>
+                <Switch value={isPublic} onValueChange={setIsPublic} trackColor={{ false: theme.colors.neutral[200], true: theme.colors.primary[400] }} thumbColor={isPublic ? theme.colors.primary[600] : theme.colors.neutral[400]} />
+              </View>
+
+              {/* Create Button */}
+              <TouchableOpacity onPress={handleCreate} disabled={!canCreate}
+                style={{ height: 54, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: canCreate ? theme.colors.primary[500] : theme.colors.neutral[200], marginBottom: 4 }}
+                activeOpacity={0.88}
+              >
+                {creating ? <ActivityIndicator color="#fff" /> : (
+                  <Text style={{ fontFamily: typography.fontFamily.sans.semibold, fontSize: 16, color: canCreate ? '#fff' : theme.colors.neutral[400] }}>
+                    Create Collection
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }

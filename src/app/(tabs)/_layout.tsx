@@ -7,7 +7,7 @@ import { theme } from '../../styles/theme';
 import { typography } from '../../styles/typography';
 
 const TAB_BAR_BASE_HEIGHT = Platform.OS === 'ios' ? 84 : 64;
-const TAB_BAR_TOP_PADDING = 8;
+const TAB_BAR_TOP_PADDING = 10;
 const TAB_BAR_EXTRA_BOTTOM = Platform.OS === 'ios' ? 24 : 8;
 
 export default function TabsLayout() {
@@ -31,8 +31,9 @@ export default function TabsLayout() {
           elevation: 0,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: 11,
           fontFamily: typography.fontFamily.sans.medium,
+          marginTop: 1,
         },
       }}
     >
@@ -40,8 +41,8 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size} color={color} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'home' : 'home-outline'} size={size} color={color} />
           ),
         }}
       />
@@ -49,26 +50,26 @@ export default function TabsLayout() {
         name="discover"
         options={{
           title: 'Discover',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="search" size={size} color={color} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'search' : 'search-outline'} size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="create"
         options={{
-          title: 'Create',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="add-circle" size={size} color={color} />
+          title: 'Wardrobe',
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'albums' : 'albums-outline'} size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="wardrobe"
         options={{
-          title: 'Wardrobe',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="grid" size={size} color={color} />
+          title: 'Saved',
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'heart' : 'heart-outline'} size={size} color={color} />
           ),
         }}
       />
@@ -76,12 +77,11 @@ export default function TabsLayout() {
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person" size={size} color={color} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'person' : 'person-outline'} size={size} color={color} />
           ),
         }}
       />
     </Tabs>
   );
 }
-

@@ -72,15 +72,15 @@ export default function VerifyOTPScreen() {
 
       if (!authData.user) throw new Error('Signup failed');
 
-      // Create user profile
+      // Create user profile (upsert in case trigger already created the row)
       const { error: profileError } = await supabase
         .from('users')
-        .insert({
+        .upsert({
           id: authData.user.id,
           email,
           onboarding_completed: false,
           style_quiz_completed: false,
-        });
+        }, { onConflict: 'id', ignoreDuplicates: true });
 
       if (profileError) throw profileError;
 

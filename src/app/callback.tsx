@@ -134,28 +134,20 @@ export default function CallbackScreen() {
       };
       const avatarUrl = authUser ? extractAvatarUrl(authUser) : undefined;
 
-      const { data: existing, error: selectError } = await supabase
-        .from('users')
-        .select('id')
-        .eq('id', userId)
-        .maybeSingle();
+      // IMPORTANT: ignoreDuplicates ensures we never overwrite completion flags for existing users.
+      if (!authEmail) {
+        console.error('⚠️ Cannot create users row: missing email (email is NOT NULL).');
+      } else {
+        const { error: insertError } = await supabase.from('users').upsert({
+          id: userId,
+          email: authEmail,
+          avatar_url: avatarUrl ?? null,
+          onboarding_completed: false,
+          style_quiz_completed: false,
+        }, { onConflict: 'id', ignoreDuplicates: true });
 
-      if (!existing) {
-        if (selectError) console.error('⚠️ users select error (continuing):', selectError);
-        if (!authEmail) {
-          console.error('⚠️ Cannot create users row: missing email (email is NOT NULL).');
-        } else {
-          const { error: insertError } = await supabase.from('users').insert({
-            id: userId,
-            email: authEmail,
-            avatar_url: avatarUrl ?? null,
-            onboarding_completed: false,
-            style_quiz_completed: false,
-          });
-
-          if (insertError) {
-            console.error('⚠️ Failed to insert public.users row (check RLS/policies):', insertError);
-          }
+        if (insertError) {
+          console.error('⚠️ Failed to ensure public.users row:', insertError);
         }
       }
 

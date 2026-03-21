@@ -49,34 +49,24 @@ export default function AuthWelcomeScreen() {
   };
 
   const ensureUsersRow = async (userId: string, email?: string | null, user?: any) => {
+    // IMPORTANT: ignoreDuplicates ensures we never overwrite completion flags for existing users.
     const avatarUrl = user ? extractAvatarUrl(user) : undefined;
-
-    // IMPORTANT: do NOT upsert completion flags here.
-    // Old users would get their onboarding/style flags overwritten back to false.
-    const { data: existing, error: selectError } = await supabase
-      .from('users')
-      .select('id')
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (existing) return;
-    if (selectError) console.error('⚠️ users select error (continuing):', selectError);
 
     if (!email) {
       console.error('⚠️ Cannot create users row: missing email (email is NOT NULL).');
       return;
     }
 
-    const { error: insertError } = await supabase.from('users').insert({
+    const { error: insertError } = await supabase.from('users').upsert({
       id: userId,
       email,
       avatar_url: avatarUrl ?? null,
       onboarding_completed: false,
       style_quiz_completed: false,
-    });
+    }, { onConflict: 'id', ignoreDuplicates: true });
 
     if (insertError) {
-      console.error('⚠️ Failed to insert public.users row (check RLS/policies):', insertError);
+      console.error('⚠️ Failed to ensure public.users row:', insertError);
     }
   };
 

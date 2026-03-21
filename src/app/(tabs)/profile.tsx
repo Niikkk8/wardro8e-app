@@ -22,6 +22,7 @@ import { theme } from "@/styles/theme";
 import { typography } from "@/styles/typography";
 import { Product } from "@/types";
 import { getProductsByIds } from "@/lib/productsApi";
+import ProductCard from "@/components/ui/ProductCard";
 
 let ImagePicker: typeof import("expo-image-picker") | null = null;
 try {
@@ -238,94 +239,10 @@ export default function ProfilePage() {
     router.push(`/product/${productId}`);
   };
 
-  const renderProductCard = (product: Product) => {
-    const hasDiscount = product.sale_price && product.sale_price < product.price;
-    const displayPrice = hasDiscount ? product.sale_price : product.price;
-
-    return (
-      <TouchableOpacity
-        key={product.id}
-        onPress={() => handleProductPress(product.id)}
-        className="mb-4"
-        style={{ width: PRODUCT_CARD_WIDTH }}
-        activeOpacity={0.9}
-      >
-        <View
-          className="bg-white rounded-2xl overflow-hidden"
-          style={{
-            shadowColor: "#000",
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.08,
-            shadowRadius: 8,
-            elevation: 3,
-          }}
-        >
-          <Image
-            source={{ uri: product.image_urls?.[0] }}
-            style={{
-              width: "100%",
-              height: PRODUCT_CARD_WIDTH * 1.3,
-              backgroundColor: theme.colors.neutral[100],
-            }}
-            resizeMode="cover"
-          />
-          <View className="p-3">
-            {product.source_brand_name && (
-              <Text
-                className="text-neutral-500 mb-1"
-                style={{
-                  fontFamily: typography.fontFamily.sans.medium,
-                  fontSize: 10,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                }}
-                numberOfLines={1}
-              >
-                {product.source_brand_name}
-              </Text>
-            )}
-            <Text
-              className="text-neutral-900 mb-2"
-              style={{
-                fontFamily: typography.fontFamily.sans.medium,
-                fontSize: 12,
-                lineHeight: 16,
-              }}
-              numberOfLines={2}
-            >
-              {product.title}
-            </Text>
-            <View className="flex-row items-center gap-2">
-              <Text
-                className="text-neutral-900"
-                style={{
-                  fontFamily: typography.fontFamily.sans.bold,
-                  fontSize: 14,
-                }}
-              >
-                ₹{displayPrice?.toLocaleString("en-IN")}
-              </Text>
-              {hasDiscount && (
-                <Text
-                  className="text-neutral-400 line-through"
-                  style={{
-                    fontFamily: typography.fontFamily.sans.regular,
-                    fontSize: 11,
-                  }}
-                >
-                  ₹{product.price.toLocaleString("en-IN")}
-                </Text>
-              )}
-            </View>
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  };
 
   if (loading) {
     return (
-      <SafeAreaView edges={["top"]} className="flex-1 bg-white">
+      <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: '#f8f8f8' }}>
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator size="large" color={theme.colors.primary[500]} />
         </View>
@@ -337,13 +254,13 @@ export default function ProfilePage() {
   const gender = formatGender(profile?.gender);
 
   return (
-    <SafeAreaView edges={["top"]} className="flex-1 bg-white">
+    <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: '#f8f8f8' }}>
       {/* Header - matching homepage style */}
       <View
         className="flex-row items-center justify-between px-4 py-3 border-b"
         style={{
           borderBottomColor: theme.colors.neutral[200],
-          backgroundColor: "#FFFFFF",
+          backgroundColor: "#f8f8f8",
         }}
       >
         <Text
@@ -579,7 +496,7 @@ export default function ProfilePage() {
                 Reset your preferences and start fresh
               </Text>
             </View>
-            <Ionicons name="refresh-outline" size={20} color={theme.colors.neutral[400]} />
+            {/* <Ionicons name="refresh-outline" size={20} color={theme.colors.neutral[400]} /> */}
           </TouchableOpacity>
         </View>
 
@@ -614,17 +531,19 @@ export default function ProfilePage() {
             className="flex-row items-center justify-between py-4 px-5 bg-neutral-50 rounded-2xl border border-neutral-200"
             activeOpacity={0.7}
           >
-            <View className="flex-row items-center gap-3">
-              <View className="items-center justify-center rounded-xl w-10 h-10 bg-neutral-200">
+            <View className="flex-row items-center gap-3 flex-1">
+              {/* <View className="items-center justify-center rounded-xl w-10 h-10 bg-neutral-200">
                 <Ionicons name="trash-outline" size={18} color={theme.colors.neutral[600]} />
-              </View>
-              <View>
+              </View> */}
+              <View style={{ flexShrink: 1 }}>
                 <Text
                   className="text-neutral-900"
                   style={{
                     fontFamily: typography.fontFamily.sans.semibold,
                     fontSize: 15,
                   }}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
                 >
                   Reset preferences & data
                 </Text>
@@ -634,6 +553,8 @@ export default function ProfilePage() {
                     fontFamily: typography.fontFamily.sans.regular,
                     fontSize: 12,
                   }}
+                  numberOfLines={2}
+                  ellipsizeMode="tail"
                 >
                   Clear feed cache, recently viewed, and learned preferences
                 </Text>
@@ -655,8 +576,15 @@ export default function ProfilePage() {
             Recently Viewed
           </Text>
 
-          <View className="flex-row flex-wrap justify-between">
-            {recentlyViewedProducts.map((product) => renderProductCard(product))}
+          <View className="flex-row flex-wrap justify-between gap-y-3">
+            {recentlyViewedProducts.map((product) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                width={PRODUCT_CARD_WIDTH}
+                onPress={() => handleProductPress(product.id)}
+              />
+            ))}
           </View>
         </View>
 

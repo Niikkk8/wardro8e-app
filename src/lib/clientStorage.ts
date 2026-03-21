@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Product, StyleCounter, FeedCache, FeedType } from '../types';
 
 const CACHE_TTL = {
-  FEED: 15 * 60 * 1000,
+  FEED: 5 * 60 * 1000,
   PRODUCT: 60 * 60 * 1000,
   SIMILAR: 30 * 60 * 1000,
   INTERACTION_DEDUP: 24 * 60 * 60 * 1000,
