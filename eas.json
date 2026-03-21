@@ -15,7 +15,7 @@
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
       },
-      "prebuildCommand": "npx expo prebuild --clean && node scripts/patch-gradle-properties.js && node scripts/patch-root-build-gradle.js && node scripts/patch-native-modules-agp.js && node scripts/patch-app-build-gradle.js"
+      "prebuildCommand": "node scripts/patch-gradle-properties.js && node scripts/patch-root-build-gradle.js && node scripts/patch-native-modules-agp.js && node scripts/patch-app-build-gradle.js"
     },
     "preview": {
       "distribution": "internal",
@@ -27,7 +27,7 @@
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
       },
-      "prebuildCommand": "npx expo prebuild --clean && node scripts/patch-gradle-properties.js && node scripts/patch-root-build-gradle.js && node scripts/patch-native-modules-agp.js && node scripts/patch-app-build-gradle.js"
+      "prebuildCommand": "node scripts/patch-gradle-properties.js && node scripts/patch-root-build-gradle.js && node scripts/patch-native-modules-agp.js && node scripts/patch-app-build-gradle.js"
     },
     "production": {
       "autoIncrement": true,
@@ -39,7 +39,7 @@
       "env": {
         "EXPO_USE_COMMUNITY_AUTOLINKING": "0"
       },
-      "prebuildCommand": "npx expo prebuild --clean && node scripts/patch-gradle-properties.js && node scripts/patch-root-build-gradle.js && node scripts/patch-native-modules-agp.js && node scripts/patch-app-build-gradle.js"
+      "prebuildCommand": "node scripts/patch-gradle-properties.js && node scripts/patch-root-build-gradle.js && node scripts/patch-native-modules-agp.js && node scripts/patch-app-build-gradle.js"
     }
   },
   "submit": {
