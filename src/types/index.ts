@@ -93,6 +93,11 @@ export interface StyleCounter {
   style_scores: Record<string, number>;
   color_scores: Record<string, number>;
   pattern_scores: Record<string, number>;
+  occasion_scores: Record<string, number>;
+  season_scores: Record<string, number>;
+  subcategory_scores: Record<string, number>;
+  // Tracks prices of high-intent (like/save/purchase) interactions for price range inference
+  price_samples: number[];
   last_synced_at: string;
 }
 

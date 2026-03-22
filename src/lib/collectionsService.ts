@@ -19,6 +19,8 @@ export interface CreateCollectionInput {
   name: string;
   description?: string;
   coverImageUri?: string | null;
+  coverImageMimeType?: string | null;
+  coverImageBase64?: string | null;
   isPublic: boolean;
   tags?: string[];
 }
@@ -66,7 +68,12 @@ export async function fetchCollectionById(id: string): Promise<CollectionRecord 
 export async function createCollection(input: CreateCollectionInput): Promise<CollectionRecord> {
   let coverImageUrl: string | null = null;
   if (input.coverImageUri) {
-    coverImageUrl = await uploadCoverImage(input.userId, input.coverImageUri);
+    coverImageUrl = await uploadCoverImage(
+      input.userId,
+      input.coverImageUri,
+      input.coverImageMimeType ?? undefined,
+      input.coverImageBase64 ?? undefined,
+    );
   }
 
   const { data, error } = await supabase
@@ -119,25 +126,39 @@ export async function removeProductFromCollection(collectionId: string, productI
 
 // ── Cover image upload ──────────────────────────────────────────────────────
 
-export async function uploadCoverImage(userId: string, localUri: string): Promise<string | null> {
+export async function uploadCoverImage(userId: string, localUri: string, mimeType?: string, base64Data?: string): Promise<string | null> {
   try {
-    const ext = localUri.split('.').pop()?.split('?')[0] ?? 'jpg';
-    const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+    const contentType = mimeType ?? 'image/jpeg';
+    const ext = contentType.split('/')[1]?.split('+')[0] ?? 'jpg';
     const fileName = `${userId}/${Date.now()}.${ext}`;
 
-    const response = await fetch(localUri);
-    const blob = await response.blob();
-    const arrayBuffer = await blob.arrayBuffer();
+    let body: Uint8Array | Blob;
+    if (base64Data) {
+      // Avoid fetch(file://) which fails on Android — use the base64 data directly
+      const binaryString = atob(base64Data);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      body = bytes;
+    } else {
+      const response = await fetch(localUri);
+      body = await response.blob();
+    }
 
     const { error } = await supabase.storage
       .from('collection-covers')
-      .upload(fileName, arrayBuffer, { contentType: mimeType, upsert: false });
+      .upload(fileName, body, { contentType, upsert: false });
 
-    if (error) return null;
+    if (error) {
+      console.error('[uploadCoverImage] Upload failed:', error.message);
+      return null;
+    }
 
     const { data } = supabase.storage.from('collection-covers').getPublicUrl(fileName);
     return data.publicUrl;
-  } catch {
+  } catch (e) {
+    console.error('[uploadCoverImage] Exception:', e);
     return null;
   }
 }

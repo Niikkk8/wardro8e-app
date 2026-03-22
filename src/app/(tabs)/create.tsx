@@ -20,6 +20,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  StyleSheet,
 } from 'react-native';
 
 let LinearGradient: any = null;
@@ -41,7 +42,7 @@ import {
 let Haptics: any = null;
 try { Haptics = require('expo-haptics'); } catch {}
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const CARD_GAP = theme.spacing.md;
 const CARD_WIDTH = (SCREEN_WIDTH - theme.spacing.lg * 2 - CARD_GAP) / 2;
 
@@ -192,7 +193,7 @@ export default function CreatePage() {
                 Discover and save collections from other users
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={15} color={theme.colors.neutral[300]} />
+            <Ionicons name="chevron-forward" size={20} color={theme.colors.neutral[300]} />
           </TouchableOpacity>
         </ScrollView>
       )}
@@ -357,15 +358,19 @@ function CreateCollectionSheet({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [isPublic, setIsPublic] = useState(true);
-  const [coverUri, setCoverUri] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [coverUri, setCoverUri] = useState<string | null>(null);
+  const [coverMimeType, setCoverMimeType] = useState<string | null>(null);
+  const [coverBase64, setCoverBase64] = useState<string | null>(null);
 
   const reset = () => {
     setName('');
     setDescription('');
     setIsPublic(true);
-    setCoverUri(null);
     setCreating(false);
+    setCoverUri(null);
+    setCoverMimeType(null);
+    setCoverBase64(null);
   };
 
   const handleClose = () => {
@@ -380,13 +385,16 @@ function CreateCollectionSheet({
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [4, 5],
       quality: 0.8,
+      base64: true,
     });
     if (!result.canceled && result.assets[0]) {
       setCoverUri(result.assets[0].uri);
+      setCoverMimeType(result.assets[0].mimeType ?? null);
+      setCoverBase64(result.assets[0].base64 ?? null);
     }
   };
 
@@ -399,6 +407,8 @@ function CreateCollectionSheet({
         name: name.trim(),
         description: description.trim() || undefined,
         coverImageUri: coverUri,
+        coverImageMimeType: coverMimeType,
+        coverImageBase64: coverBase64,
         isPublic,
       });
       reset();
@@ -413,22 +423,27 @@ function CreateCollectionSheet({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      {/* Backdrop — separate from KAV so it doesn't go fullscreen */}
+      <TouchableOpacity
+        style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' }}
+        onPress={handleClose}
+        activeOpacity={1}
+      />
+
+      {/* KAV only wraps the sheet, anchored to bottom */}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+        style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}
       >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' }}>
-          <TouchableOpacity style={{ flex: 1 }} onPress={handleClose} activeOpacity={1} />
-
-          <View
-            style={{
-              backgroundColor: '#fff',
-              borderTopLeftRadius: 28,
-              borderTopRightRadius: 28,
-              paddingBottom: Platform.OS === 'ios' ? 40 : 24,
-            }}
-          >
+        <View
+          style={{
+            backgroundColor: '#fff',
+            borderTopLeftRadius: 28,
+            borderTopRightRadius: 28,
+            paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+            maxHeight: SCREEN_HEIGHT * 0.9,
+          }}
+        >
             {/* Handle */}
             <View style={{ alignItems: 'center', paddingTop: 12, paddingBottom: 4 }}>
               <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: theme.colors.neutral[200] }} />
@@ -602,12 +617,12 @@ function CreateCollectionSheet({
                 )}
               </TouchableOpacity>
             </ScrollView>
-          </View>
         </View>
       </KeyboardAvoidingView>
     </Modal>
   );
 }
+
 
 // ── Shared styles ────────────────────────────────────────────────────────────
 

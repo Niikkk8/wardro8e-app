@@ -245,7 +245,7 @@ export default function ProductDetailPage() {
   };
 
   const handleProductPress = (productId: string) => {
-    router.replace(`/product/${productId}`);
+    router.push(`/product/${productId}`);
   };
 
   if (loading && !product) {

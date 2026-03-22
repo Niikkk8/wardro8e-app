@@ -590,7 +590,14 @@ export const feedService = {
     // No "already seen" exclusions — with a small catalog that would over-restrict the feed.
     const allExcludeIds = feedOptions.excludeIds ?? [];
 
-    const gender = userId ? await this.getUserGender(userId) : null;
+    // Parallel fetch: gender, feed type determination, and preferences all at once.
+    // This saves 1-2 sequential Supabase round trips on every feed load.
+    const [gender, feedType, prefs] = await Promise.all([
+      userId ? this.getUserGender(userId) : Promise.resolve(null),
+      this.determineFeedType(userId),
+      userId ? this.getUserPreferences(userId) : Promise.resolve(null),
+    ]);
+
     // When logged in but gender unknown, use safe default so we never show wrong gender
     const effectiveGender = feedOptions.gender || gender || (userId ? 'unisex_only' : null);
 
@@ -600,19 +607,16 @@ export const feedService = {
       gender: effectiveGender,
     };
 
-    const feedType = await this.determineFeedType(userId);
     if (__DEV__) console.log('[Feed] Loading feed from API, type:', feedType);
 
     let products: Product[];
 
     switch (feedType) {
       case 'behavioral': {
-        const prefs = userId ? await this.getUserPreferences(userId) : null;
         products = await this.getBehavioralFeed(userId!, prefs, mergedOptions);
         break;
       }
       case 'preference': {
-        const prefs = await this.getUserPreferences(userId!);
         if (prefs) {
           products = await this.getPreferenceFeed(prefs, mergedOptions);
         } else {

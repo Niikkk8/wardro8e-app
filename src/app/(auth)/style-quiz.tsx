@@ -124,7 +124,9 @@ export default function StyleQuizScreen() {
         .eq('id', user.id);
 
       await storage.setStyleQuizCompleted(true);
-      await preferenceService.resetLearnedPreferences(user.id);
+      // Seed local style counters from quiz answers so behavioral data adds to
+      // the quiz baseline instead of overwriting it on the first sync.
+      await preferenceService.seedCountersFromQuiz(user.id, selectedStyles, selectedColors, selectedPatterns);
       router.replace('/(tabs)');
     } catch (e: any) {
       Alert.alert('Error', e.message);

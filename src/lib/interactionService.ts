@@ -2,6 +2,19 @@ import { supabase } from './supabase';
 import { clientStorage } from './clientStorage';
 import { InteractionType, INTERACTION_WEIGHTS } from '../types';
 
+// Time decay half-life: ~14 days. An interaction from 14 days ago retains 50% weight.
+const DECAY_RATE = 0.05; // e^(-0.05 * 14) ≈ 0.50
+
+function applyTimeDecay(baseWeight: number, createdAt: string): number {
+  try {
+    const daysAgo = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24);
+    const decay = Math.exp(-DECAY_RATE * daysAgo);
+    return baseWeight * decay;
+  } catch {
+    return baseWeight;
+  }
+}
+
 export const interactionService = {
   /**
    * Log a user interaction. Handles dedup for views (24hr window).
@@ -27,7 +40,7 @@ export const interactionService = {
       await clientStorage.addRecentlyViewed(userId, productId);
     }
 
-    // Fire-and-forget Supabase insert
+    // Fire-and-forget Supabase insert + click_count increment
     this._insertToSupabase(userId, productId, type).catch(() => {});
 
     return true;
@@ -50,6 +63,18 @@ export const interactionService = {
       }
     } catch (e) {
       // Supabase table may not exist yet — fail silently
+    }
+
+    // Increment click_count for non-dismiss interactions.
+    // Requires the `increment_product_click_count` SQL function in Supabase:
+    //   CREATE OR REPLACE FUNCTION increment_product_click_count(product_id UUID)
+    //   RETURNS void LANGUAGE sql AS $$
+    //     UPDATE products SET click_count = COALESCE(click_count, 0) + 1 WHERE id = product_id;
+    //   $$;
+    if (type !== 'dismiss') {
+      supabase
+        .rpc('increment_product_click_count', { product_id: productId })
+        .catch(() => {}); // Fail silently if RPC not yet created
     }
   },
 
@@ -79,7 +104,8 @@ export const interactionService = {
 
   /**
    * Get recent interactions for behavioral feed scoring.
-   * Returns product IDs with their weighted scores.
+   * Returns product IDs with time-decayed weighted scores.
+   * More recent interactions have proportionally higher influence.
    */
   async getInteractionScores(
     userId: string
@@ -89,21 +115,22 @@ export const interactionService = {
     try {
       const { data, error } = await supabase
         .from('user_interactions')
-        .select('product_id, interaction_type')
+        .select('product_id, interaction_type, created_at')
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(200);
 
       if (!error && data) {
         for (const row of data) {
-          const weight = INTERACTION_WEIGHTS[row.interaction_type as InteractionType] || 0;
-          scores[row.product_id] = (scores[row.product_id] || 0) + weight;
+          const baseWeight = INTERACTION_WEIGHTS[row.interaction_type as InteractionType] || 0.1;
+          const decayedWeight = applyTimeDecay(baseWeight, row.created_at);
+          scores[row.product_id] = (scores[row.product_id] || 0) + decayedWeight;
         }
         return scores;
       }
     } catch {}
 
-    // Fallback: use local recently viewed (all weight = 0.2 for views)
+    // Fallback: use local recently viewed (views decay to near-zero quickly)
     const recent = await clientStorage.getRecentlyViewed(userId);
     for (const pid of recent) {
       scores[pid] = (scores[pid] || 0) + 0.2;

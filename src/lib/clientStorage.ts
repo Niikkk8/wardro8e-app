@@ -2,9 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Product, StyleCounter, FeedCache, FeedType } from '../types';
 
 const CACHE_TTL = {
-  FEED: 5 * 60 * 1000,
-  PRODUCT: 60 * 60 * 1000,
-  SIMILAR: 30 * 60 * 1000,
+  FEED: 15 * 60 * 1000,      // 15 min (was 5) — matches RECOMMENDATION.md spec
+  PRODUCT: 60 * 60 * 1000,   // 1 hour
+  SIMILAR: 10 * 60 * 1000,   // 10 min (was 30) — so high-intent actions are reflected sooner
   INTERACTION_DEDUP: 24 * 60 * 60 * 1000,
 };
 
@@ -99,12 +99,29 @@ export const clientStorage = {
   async getStyleCounters(userId: string): Promise<StyleCounter> {
     try {
       const raw = await AsyncStorage.getItem(styleCounterKey(userId));
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        // Backfill new fields for users with older stored data
+        return {
+          style_scores: parsed.style_scores ?? {},
+          color_scores: parsed.color_scores ?? {},
+          pattern_scores: parsed.pattern_scores ?? {},
+          occasion_scores: parsed.occasion_scores ?? {},
+          season_scores: parsed.season_scores ?? {},
+          subcategory_scores: parsed.subcategory_scores ?? {},
+          price_samples: parsed.price_samples ?? [],
+          last_synced_at: parsed.last_synced_at ?? new Date().toISOString(),
+        };
+      }
     } catch {}
     return {
       style_scores: {},
       color_scores: {},
       pattern_scores: {},
+      occasion_scores: {},
+      season_scores: {},
+      subcategory_scores: {},
+      price_samples: [],
       last_synced_at: new Date().toISOString(),
     };
   },
