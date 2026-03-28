@@ -6,6 +6,7 @@ import { Product, FeedType, FeedOptions, UserPreferences } from '../types';
 
 const DEFAULT_LIMIT = 20;
 const PYTHON_SERVICE_URL = process.env.EXPO_PUBLIC_PYTHON_SERVICE_URL || '';
+const PYTHON_API_KEY = process.env.EXPO_PUBLIC_PYTHON_API_KEY || '';
 const FEED_TIMEOUT_MS = 10000;
 const EXPLORE_TIMEOUT_MS = 8000;
 
@@ -156,7 +157,7 @@ async function callPythonPersonalizedFeed(
 
     const response = await fetch(`${PYTHON_SERVICE_URL}/personalized-feed`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(PYTHON_API_KEY ? { 'X-API-Key': PYTHON_API_KEY } : {}) },
       body: JSON.stringify({
         user_id: userId,
         limit: options.limit ?? DEFAULT_LIMIT,
@@ -268,7 +269,7 @@ export const exploreService = {
 
         const response = await fetch(`${PYTHON_SERVICE_URL}/explore-feed`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(PYTHON_API_KEY ? { 'X-API-Key': PYTHON_API_KEY } : {}) },
           body: JSON.stringify({
             limit,
             offset,
@@ -306,7 +307,7 @@ export const exploreService = {
 
         const response = await fetch(`${PYTHON_SERVICE_URL}/trending`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(PYTHON_API_KEY ? { 'X-API-Key': PYTHON_API_KEY } : {}) },
           body: JSON.stringify({ limit, gender: gender ?? null }),
           signal: controller.signal,
         });

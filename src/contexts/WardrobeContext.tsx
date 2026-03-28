@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { interactionService } from '../lib/interactionService';
 import { preferenceService } from '../lib/preferenceService';
 import { getProductById } from '../lib/productsApi';
+import { analytics } from '../lib/analytics';
 
 export interface UserCollection {
   id: string;
@@ -120,7 +121,14 @@ export function WardrobeProvider({ children }: { children: React.ReactNode }) {
         if (!wasLiked && userId) {
           interactionService.logInteraction(userId, productId, 'like').catch(() => {});
           getProductById(productId).then((product) => {
-            if (product) preferenceService.handleInteraction(userId, product, 'like').catch(() => {});
+            if (product) {
+              preferenceService.handleInteraction(userId, product, 'like').catch(() => {});
+              analytics.productLiked({
+                product_id: productId,
+                category: product.category,
+                style_tags: product.style ?? [],
+              });
+            }
           });
         }
 
@@ -153,7 +161,7 @@ export function WardrobeProvider({ children }: { children: React.ReactNode }) {
   const createCollection = useCallback(
     (name: string, description?: string): UserCollection => {
       const newCol: UserCollection = {
-        id: `user-col-${Date.now()}`,
+        id: `user-col-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         name,
         description,
         productIds: [],

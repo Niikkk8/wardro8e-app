@@ -3,6 +3,7 @@ import { clientStorage } from './clientStorage';
 import { getProducts } from './productsApi';
 
 const PYTHON_SERVICE_URL = process.env.EXPO_PUBLIC_PYTHON_SERVICE_URL || '';
+const PYTHON_API_KEY = process.env.EXPO_PUBLIC_PYTHON_API_KEY || '';
 const SIMILAR_PRODUCTS_TIMEOUT_MS = 8000;
 
 function normalizeProductGender(g: string | undefined | null): 'men' | 'women' | 'unisex' {
@@ -103,7 +104,7 @@ async function callPythonSimilarProducts(
 
     const response = await fetch(`${PYTHON_SERVICE_URL}/similar-products`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(PYTHON_API_KEY ? { 'X-API-Key': PYTHON_API_KEY } : {}) },
       body: JSON.stringify(body),
       signal: controller.signal,
     });

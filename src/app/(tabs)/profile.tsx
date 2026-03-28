@@ -82,11 +82,9 @@ export default function ProfilePage() {
         .from("user_preferences")
         .select("*")
         .eq("user_id", user.id)
-        .single();
+        .maybeSingle();
 
-      if (preferencesError && preferencesError.code !== "PGRST116") {
-        throw preferencesError;
-      }
+      if (preferencesError) throw preferencesError;
 
       setProfile(profileData);
       setPreferences(preferencesData || null);

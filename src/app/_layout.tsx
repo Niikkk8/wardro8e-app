@@ -23,8 +23,30 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { WardrobeProvider } from "@/contexts/WardrobeContext";
 import { setupDevTools } from "@/utils/devTools";
 import { preferenceService } from "@/lib/preferenceService";
+import { feedService } from "@/lib/feedService";
+import { analytics } from "@/lib/analytics";
 
 SplashScreen.preventAutoHideAsync();
+
+function AppOpenManager() {
+  const { user, loading } = useAuth();
+  const fired = useRef(false);
+
+  useEffect(() => {
+    if (loading || fired.current) return;
+    fired.current = true;
+
+    const userId = user?.id ?? null;
+    if (userId) analytics.identify(userId);
+
+    feedService
+      .determineFeedType(userId)
+      .then((feedType) => analytics.appOpened(feedType))
+      .catch(() => analytics.appOpened('cold_start'));
+  }, [loading]);
+
+  return null;
+}
 
 function PreferenceSyncManager({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -86,6 +108,7 @@ export default function Layout() {
       <AuthProvider>
         <WardrobeProvider>
           <PreferenceSyncManager>
+            <AppOpenManager />
             <Slot />
           </PreferenceSyncManager>
         </WardrobeProvider>

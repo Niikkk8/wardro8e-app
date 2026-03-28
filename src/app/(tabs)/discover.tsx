@@ -23,6 +23,7 @@ import {
   Animated,
   ActivityIndicator,
   Modal,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router as expoRouter } from 'expo-router';
@@ -121,6 +122,8 @@ export default function DiscoverPage() {
   const [searchResults, setSearchResults] = useState<Product[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [allProductsCache, setAllProductsCache] = useState<Product[]>([]);
+  const allProductsCacheTimeRef = useRef<number>(0);
+  const [refreshing, setRefreshing] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
 
   // ── Filter state ────────────────────────────────────────────────────────────
@@ -344,20 +347,45 @@ export default function DiscoverPage() {
   }, [loadingMore, hasMore, isSearchActive, hasActiveFilters, feedProducts.length, seenIds, userGender, selectedVibe]);
 
   // ── Product cache for search + filter ──────────────────────────────────────
-  useEffect(() => {
-    if (allProductsCache.length === 0) {
-      getProducts({
-        limit: 400,
-        orderBy: ['is_featured', 'created_at'],
-        orderAsc: [false, false],
+  const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+  const refreshAllProductsCache = useCallback(() => {
+    getProducts({
+      limit: 400,
+      orderBy: ['is_featured', 'created_at'],
+      orderAsc: [false, false],
+    })
+      .then((products) => {
+        setAllProductsCache(products);
+        allProductsCacheTimeRef.current = Date.now();
       })
-        .then((products) => setAllProductsCache(products))
-        .catch(() => {});
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const stale = Date.now() - allProductsCacheTimeRef.current > CACHE_TTL_MS;
+    if (allProductsCache.length === 0 || stale) {
+      refreshAllProductsCache();
     }
   }, []);
 
+  // ── Pull-to-refresh ─────────────────────────────────────────────────────────
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    refreshAllProductsCache();
+    await loadInitial(selectedVibe).catch(() => {});
+    setRefreshing(false);
+  }, [refreshAllProductsCache, loadInitial, selectedVibe]);
+
   // ── Search (extended fields + token scoring) ────────────────────────────────
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clean up pending debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    };
+  }, []);
 
   const handleSearchChange = useCallback(
     (query: string) => {
@@ -543,6 +571,9 @@ export default function DiscoverPage() {
         scrollEventThrottle={24}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: 32 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+        }
       >
         {/* Vibe pills */}
         {!isSearchActive && (

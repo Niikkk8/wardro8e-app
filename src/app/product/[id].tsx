@@ -40,6 +40,7 @@ import {
   addProductToCollection,
   removeProductFromCollection,
 } from "../../lib/collectionsService";
+import { analytics } from "../../lib/analytics";
 
 let Haptics: typeof import("expo-haptics") | null = null;
 try { Haptics = require("expo-haptics"); } catch {}
@@ -135,6 +136,14 @@ export default function ProductDetailPage() {
 
     if (!resolvedProduct) return;
 
+    analytics.productViewed({
+      product_id: resolvedProduct.id,
+      category: resolvedProduct.category,
+      gender: resolvedProduct.gender,
+      price: resolvedProduct.sale_price ?? resolvedProduct.price,
+      source_platform: resolvedProduct.source_platform ?? '',
+    });
+
     // 3. Log view (fire-and-forget, deduped)
     if (userId && !viewLogged.current) {
       viewLogged.current = true;
@@ -214,6 +223,7 @@ export default function ProductDetailPage() {
         await removeProductFromCollection(col.id, id);
       } else {
         await addProductToCollection(col.id, id);
+        analytics.productSaved({ product_id: id, collection_id: col.id });
         if (userId && productRef.current) {
           interactionService.logInteraction(userId, id, 'save').catch(() => {});
           preferenceService.handleInteraction(userId, productRef.current, 'save').catch(() => {});
@@ -238,6 +248,11 @@ export default function ProductDetailPage() {
         interactionService.logInteraction(userId, id, 'purchase').catch(() => {});
         preferenceService.handleInteraction(userId, product, 'purchase').catch(() => {});
       }
+      analytics.affiliateTapped({
+        product_id: product.id,
+        affiliate_url: product.affiliate_url,
+        price: product.sale_price ?? product.price,
+      });
       await Linking.openURL(product.affiliate_url);
     } catch (error) {
       console.error("Error opening URL:", error);

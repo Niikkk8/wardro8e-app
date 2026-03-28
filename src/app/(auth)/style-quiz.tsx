@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { storage } from '@/lib/storage';
 import { preferenceService } from '@/lib/preferenceService';
+import { analytics } from '@/lib/analytics';
 import { theme } from '@/styles/theme';
 import { typography } from '@/styles/typography';
 
@@ -127,6 +128,7 @@ export default function StyleQuizScreen() {
       // Seed local style counters from quiz answers so behavioral data adds to
       // the quiz baseline instead of overwriting it on the first sync.
       await preferenceService.seedCountersFromQuiz(user.id, selectedStyles, selectedColors, selectedPatterns);
+      analytics.quizCompleted({ styles_selected: selectedStyles, skipped: false });
       router.replace('/(tabs)');
     } catch (e: any) {
       Alert.alert('Error', e.message);
@@ -146,6 +148,7 @@ export default function StyleQuizScreen() {
       );
       await supabase.from('users').update({ onboarding_completed: true }).eq('id', user.id);
       await storage.setStyleQuizCompleted(true);
+      analytics.quizCompleted({ styles_selected: [], skipped: true });
       router.replace('/(tabs)');
     } catch (e: any) {
       Alert.alert('Error', e.message);
