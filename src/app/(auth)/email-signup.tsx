@@ -106,7 +106,7 @@ export default function EmailSignupScreen() {
             placeholder="your@email.com"
             keyboardType="email-address"
             autoCapitalize="none"
-            className="bg-neutral-50 border border-neutral-200 rounded-xl h-12 px-4 text-base"
+            className="bg-neutral-50 border border-neutral-200 rounded-xl h-12 px-4 text-base text-neutral-900"
           />
         </View>
 
@@ -119,7 +119,7 @@ export default function EmailSignupScreen() {
             onChangeText={setPassword}
             placeholder="At least 6 characters"
             secureTextEntry
-            className="bg-neutral-50 border border-neutral-200 rounded-xl h-12 px-4 text-base"
+            className="bg-neutral-50 border border-neutral-200 rounded-xl h-12 px-4 text-base text-neutral-900"
           />
         </View>
                 <View className="pt-4">

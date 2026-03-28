@@ -245,7 +245,7 @@ export default function EmailLoginScreen() {
             placeholder="your@email.com"
             keyboardType="email-address"
             autoCapitalize="none"
-            className="bg-neutral-50 border border-neutral-200 rounded-xl h-12 px-4 text-base"
+            className="bg-neutral-50 border border-neutral-200 rounded-xl h-12 px-4 text-base text-neutral-900"
           />
         </View>
 
@@ -258,7 +258,7 @@ export default function EmailLoginScreen() {
             onChangeText={setPassword}
             placeholder="Enter your password"
             secureTextEntry
-            className="bg-neutral-50 border border-neutral-200 rounded-xl h-12 px-4 text-base"
+            className="bg-neutral-50 border border-neutral-200 rounded-xl h-12 px-4 text-base text-neutral-900"
           />
         </View>
                 <View className="pt-4">

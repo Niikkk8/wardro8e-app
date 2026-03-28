@@ -138,7 +138,7 @@ export default function ProfileSetupScreen() {
                     onChangeText={setFullName}
                     placeholder="Your name"
                     placeholderTextColor="#a3a3a3"
-                    className="bg-neutral-50 border border-neutral-200 rounded-xl h-12 px-4 text-base"
+                    className="bg-neutral-50 border border-neutral-200 rounded-xl h-12 px-4 text-base text-neutral-900"
                   />
                 </View>
 

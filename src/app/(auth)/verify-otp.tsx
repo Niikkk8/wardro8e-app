@@ -161,7 +161,7 @@ export default function VerifyOTPScreen() {
                     onKeyPress={(e) => handleKeyPress(e, index)}
                     keyboardType="number-pad"
                     maxLength={1}
-                    className="flex-1 h-14 bg-neutral-50 border border-neutral-200 rounded-xl text-center text-2xl font-sans-medium"
+                    className="flex-1 h-14 bg-neutral-50 border border-neutral-200 rounded-xl text-center text-2xl font-sans-medium text-neutral-900"
                     style={{ borderColor: digit ? '#208B84' : '#E5E5E5' }}
                     editable={!loading}
                   />
