@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/Admin/Desktop/wardro8e/wardro8e-app -maxdepth 2 -type f \\\\\\(-name *.config.* -o -name *.env* -o -name tsconfig* -o -name babel* -o -name eas.json \\\\\\))"
+    ]
+  }
+}

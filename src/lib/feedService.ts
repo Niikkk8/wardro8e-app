@@ -6,7 +6,7 @@ import { Product, FeedType, FeedOptions, UserPreferences } from '../types';
 
 const DEFAULT_LIMIT = 20;
 const PYTHON_SERVICE_URL = process.env.EXPO_PUBLIC_PYTHON_SERVICE_URL || '';
-const PYTHON_API_KEY = process.env.EXPO_PUBLIC_PYTHON_API_KEY || '';
+const PYTHON_API_KEY = PYTHON_SERVICE_URL;
 const FEED_TIMEOUT_MS = 10000;
 const EXPLORE_TIMEOUT_MS = 8000;
 
